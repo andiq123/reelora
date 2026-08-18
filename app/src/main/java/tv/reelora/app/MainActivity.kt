@@ -177,6 +177,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         val preferences = remember { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
         var theaterEnabled by remember { mutableStateOf(preferences.getBoolean("theaterEnabled", true)) }
         var idleMinutes by remember { mutableStateOf(preferences.getInt("idleMinutes", 1)) }
+        var compactApps by remember { mutableStateOf(preferences.getBoolean("compactApps", false)) }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
             theaterOpen = false
@@ -237,6 +238,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 Home(
                     catalog,
                     apps = apps,
+                    compactApps = compactApps,
                     onLaunch = { app ->
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(app.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -273,6 +275,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 if (settingsOpen) SettingsDialog(
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
+                    compactApps = compactApps,
                     onTheaterEnabled = {
                         theaterEnabled = it
                         preferences.edit().putBoolean("theaterEnabled", it).apply()
@@ -280,6 +283,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onIdleMinutes = {
                         idleMinutes = it
                         preferences.edit().putInt("idleMinutes", it).apply()
+                    },
+                    onCompactApps = {
+                        compactApps = it
+                        preferences.edit().putBoolean("compactApps", it).apply()
                     },
                     onSystemSettings = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) },
                     onHomeSettings = {
@@ -593,6 +600,7 @@ private fun artworkModel(url: String, fade: Boolean = false): ImageRequest {
 private fun Home(
     catalog: CatalogResult,
     apps: List<LauncherApp>,
+    compactApps: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
@@ -600,10 +608,16 @@ private fun Home(
 ) {
     val listState = rememberLazyListState()
     val searchFocus = remember { FocusRequester() }
+    val heroFocus = remember { FocusRequester() }
     val sections = launcherMovieSections(catalog)
     val featured = sections.first()
     var hero by remember(featured) { mutableStateOf(featured.items.first()) }
     var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
+    LaunchedEffect(Unit) {
+        listState.scrollToItem(0)
+        delay(160)
+        heroFocus.requestFocus()
+    }
     LaunchedEffect(hero) {
         delay(10_000)
         nextDiscoveryItem(featured.items, recent)?.let {
@@ -618,8 +632,14 @@ private fun Home(
             contentPadding = PaddingValues(top = 22.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(30.dp),
         ) {
-            item { AppDock(apps, searchFocus, onLaunch) }
-            item { Hero(hero, onSelect) }
+            item {
+                Hero(
+                    hero,
+                    onSelect,
+                    Modifier.focusRequester(heroFocus).focusProperties { up = searchFocus },
+                )
+            }
+            item { AppDock(apps, heroFocus, compactApps, onLaunch) }
             sections.forEach { section -> item(key = section.title) { MediaRow(section, onSelect) } }
             item {
                 Text(
@@ -684,57 +704,72 @@ private fun HeaderAction(label: String, glyph: String, onClick: () -> Unit, modi
 }
 
 @Composable
-private fun AppDock(apps: List<LauncherApp>, headerFocus: FocusRequester, onLaunch: (LauncherApp) -> Unit) {
-    val first = remember { FocusRequester() }
-    LaunchedEffect(apps) {
-        if (apps.isNotEmpty()) {
-            delay(160)
-            first.requestFocus()
-        }
-    }
-    Column {
-        Text("Apps", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
-        Spacer(Modifier.height(12.dp))
+private fun AppDock(
+    apps: List<LauncherApp>,
+    upFocus: FocusRequester,
+    compact: Boolean,
+    onLaunch: (LauncherApp) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 48.dp).clip(RoundedCornerShape(26.dp))
+            .background(Color.White.copy(alpha = .045f))
+            .border(1.dp, Color.White.copy(alpha = .10f), RoundedCornerShape(26.dp)),
+    ) {
+        Text(
+            "Apps",
+            color = Color.White.copy(alpha = .86f),
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 24.dp, top = 17.dp),
+        )
         if (apps.isEmpty()) {
-            Text("No TV apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.padding(horizontal = 48.dp))
-        } else LazyRow(
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = Modifier.focusGroup(),
-        ) {
-            itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
-                AppCard(
-                    app,
-                    onLaunch,
-                    if (index == 0) Modifier.focusRequester(first).focusProperties { up = headerFocus } else Modifier,
-                )
+            Text("No TV apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.padding(24.dp))
+        } else {
+            LazyRow(
+                contentPadding = PaddingValues(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
+                modifier = Modifier.focusGroup(),
+            ) {
+                itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
+                    AppCard(
+                        app,
+                        compact,
+                        onLaunch,
+                        if (index == 0) Modifier.focusProperties { up = upFocus } else Modifier,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AppCard(app: LauncherApp, onLaunch: (LauncherApp) -> Unit, modifier: Modifier = Modifier) {
+private fun AppCard(app: LauncherApp, compact: Boolean, onLaunch: (LauncherApp) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.045f else 1f, tween(120), label = "app focus")
+    val tileSize = if (compact) 86.dp else 102.dp
     Column(
-        modifier.width(126.dp).zIndex(if (focused) 1f else 0f).graphicsLayer {
+        modifier.width(tileSize + 16.dp).zIndex(if (focused) 1f else 0f).graphicsLayer {
             scaleX = scale
             scaleY = scale
         }.onFocusChanged { focused = it.isFocused }.clickable(role = Role.Button) { onLaunch(app) },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(112.dp).clip(RoundedCornerShape(24.dp))
-                .background(if (focused) Color.White else Color.White.copy(alpha = .09f))
-                .border(if (focused) 3.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = .10f), RoundedCornerShape(24.dp))
-                .padding(16.dp),
+            Modifier.size(tileSize).clip(RoundedCornerShape(if (compact) 19.dp else 22.dp))
+                .background(if (focused) Color.White.copy(alpha = .18f) else Color.White.copy(alpha = .025f))
+                .border(
+                    if (focused) 2.dp else 1.dp,
+                    if (focused) Color.White.copy(alpha = .82f) else Color.White.copy(alpha = .07f),
+                    RoundedCornerShape(if (compact) 19.dp else 22.dp),
+                )
+                .padding(if (compact) 11.dp else 13.dp),
             contentAlignment = Alignment.Center,
         ) {
             AsyncImage(model = app.icon, contentDescription = app.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
         }
-        Spacer(Modifier.height(9.dp))
-        Text(app.name, color = Color.White.copy(alpha = if (focused) 1f else .72f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(8.dp))
+        Text(app.name, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -742,8 +777,10 @@ private fun AppCard(app: LauncherApp, onLaunch: (LauncherApp) -> Unit, modifier:
 private fun SettingsDialog(
     theaterEnabled: Boolean,
     idleMinutes: Int,
+    compactApps: Boolean,
     onTheaterEnabled: (Boolean) -> Unit,
     onIdleMinutes: (Int) -> Unit,
+    onCompactApps: (Boolean) -> Unit,
     onSystemSettings: () -> Unit,
     onHomeSettings: () -> Unit,
     onDismiss: () -> Unit,
@@ -763,6 +800,12 @@ private fun SettingsDialog(
                 Text("Settings", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 Text("A simple home for apps and movies", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
                 Spacer(Modifier.height(28.dp))
+                Text("APP SHELF", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Spacer(Modifier.height(10.dp))
+                ActionButton(if (compactApps) "Compact apps" else "Comfortable apps", glyph = "▦") {
+                    onCompactApps(!compactApps)
+                }
+                Spacer(Modifier.height(24.dp))
                 Text("THEATER", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -937,10 +980,10 @@ private fun SearchDialog(
 }
 
 @Composable
-private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit) {
+private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .height(310.dp)
             .padding(horizontal = 48.dp)
