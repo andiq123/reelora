@@ -3,12 +3,17 @@ package tv.reelora.app
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.view.Gravity
 import android.view.KeyEvent
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -177,6 +182,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
             val intent = Intent(context, TrailerActivity::class.java)
                 .putExtra("videoId", feature.trailer.key)
                 .putExtra("manual", theaterReturn != null)
+                .putExtra("release", releaseLabel(feature.item.releaseDate).takeIf { it.startsWith("◷ COMING ") })
             if (theaterOpen) context.startActivity(intent) else {
                 theaterOpen = true
                 theaterLauncher.launch(intent)
@@ -279,6 +285,7 @@ class TrailerActivity : Activity() {
     }
 
     private lateinit var player: WebView
+    private lateinit var releaseBadge: TextView
     private var manual = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -308,7 +315,27 @@ class TrailerActivity : Activity() {
             isFocusable = false
             isFocusableInTouchMode = false
         }
-        setContentView(player)
+        val density = resources.displayMetrics.density
+        releaseBadge = TextView(this).apply {
+            setTextColor(0xFFFF9A82.toInt())
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = .06f
+            setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
+            background = GradientDrawable().apply {
+                setColor(0xE612121A.toInt())
+                cornerRadius = 16 * density
+                setStroke((density).toInt().coerceAtLeast(1), 0x88FF8064.toInt())
+            }
+            elevation = 8 * density
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(player, FrameLayout.LayoutParams(-1, -1))
+            addView(releaseBadge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+                topMargin = (96 * density).toInt()
+                marginEnd = (32 * density).toInt()
+            })
+        })
         play(intent)
     }
 
@@ -319,6 +346,11 @@ class TrailerActivity : Activity() {
 
     private fun play(intent: Intent) {
         manual = intent.getBooleanExtra("manual", false)
+        releaseBadge.text = intent.getStringExtra("release")
+            ?.removePrefix("◷ COMING ")
+            ?.let { "COMING  ·  $it" }
+            .orEmpty()
+        releaseBadge.visibility = if (releaseBadge.text.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
         if (manual) android.widget.Toast.makeText(
             this,
             "← →  Seek 10s   •   OK  Play/Pause   •   Back  Close",
