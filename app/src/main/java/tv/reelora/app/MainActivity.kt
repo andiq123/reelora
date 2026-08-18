@@ -2,10 +2,13 @@ package tv.reelora.app
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.view.Gravity
 import android.view.KeyEvent
@@ -64,6 +67,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -107,7 +111,12 @@ import coil3.request.crossfade
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 private val Background = Color(0xFF07070F)
 private val Surface = Color(0xFF151522)
@@ -115,9 +124,11 @@ private val Violet = Color(0xFFA978FF)
 private val Coral = Color(0xFFFF8064)
 
 private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
+private data class LauncherApp(val name: String, val component: ComponentName, val icon: android.graphics.drawable.Drawable)
 
 class MainActivity : ComponentActivity() {
     private val inputEvents = Channel<Unit>(Channel.CONFLATED)
+    private val foreground = MutableStateFlow(false)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         inputEvents.trySend(Unit)
@@ -126,12 +137,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ReeloraApp(inputEvents) }
+        setContent { ReeloraApp(inputEvents, foreground) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        foreground.value = true
+    }
+
+    override fun onPause() {
+        foreground.value = false
+        super.onPause()
     }
 }
 
 @Composable
-private fun ReeloraApp(inputEvents: Channel<Unit>) {
+private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<Boolean>) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Violet,
@@ -143,14 +164,19 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
         )
     ) {
         var result by remember { mutableStateOf<CatalogResult?>(null) }
+        var apps by remember { mutableStateOf(emptyList<LauncherApp>()) }
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
-        var currentPage by remember { mutableStateOf(0) }
+        var settingsOpen by remember { mutableStateOf(false) }
         var theater by remember { mutableStateOf<TheaterFeature?>(null) }
         var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
         var theaterOpen by remember { mutableStateOf(false) }
+        val isForeground by foreground.collectAsState()
         val context = LocalContext.current
+        val preferences = remember { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
+        var theaterEnabled by remember { mutableStateOf(preferences.getBoolean("theaterEnabled", true)) }
+        var idleMinutes by remember { mutableStateOf(preferences.getInt("idleMinutes", 1)) }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
             theaterOpen = false
@@ -163,7 +189,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
                 theaterScope.launch {
                     theater = catalog?.let {
                         findTheaterFeature(
-                            it.sections.filter { section -> section.page == currentPage }.flatMap { section -> section.items },
+                            launcherMovieSections(it).flatMap { section -> section.items },
                             recentTheater,
                         )
                     }
@@ -175,7 +201,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
                 theaterReturn = null
             }
         }
-        LaunchedEffect(Unit) { result = CatalogRepository.load() }
+        LaunchedEffect(Unit) {
+            launch { result = CatalogRepository.load() }
+            apps = withContext(Dispatchers.IO) { installedTvApps(context) }
+        }
 
         LaunchedEffect(theater?.trailer?.key) {
             val feature = theater ?: return@LaunchedEffect
@@ -208,9 +237,14 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
             } else {
                 Home(
                     catalog,
-                    selectedCategory = currentPage,
-                    onCategory = { currentPage = it },
+                    apps = apps,
+                    onLaunch = { app ->
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(app.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    },
                     onSearch = { searching = true },
+                    onSettings = { settingsOpen = true },
                     onSelect = { selected = it },
                 )
                 if (searching) {
@@ -237,15 +271,33 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
                         },
                     )
                 }
+                if (settingsOpen) SettingsDialog(
+                    theaterEnabled = theaterEnabled,
+                    idleMinutes = idleMinutes,
+                    onTheaterEnabled = {
+                        theaterEnabled = it
+                        preferences.edit().putBoolean("theaterEnabled", it).apply()
+                    },
+                    onIdleMinutes = {
+                        idleMinutes = it
+                        preferences.edit().putInt("idleMinutes", it).apply()
+                    },
+                    onSystemSettings = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) },
+                    onHomeSettings = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
+                            .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+                    },
+                    onDismiss = { settingsOpen = false },
+                )
             }
         }
 
-        LaunchedEffect(currentPage, result, theater) {
+        LaunchedEffect(result, theater, theaterEnabled, idleMinutes, isForeground) {
             val catalog = result ?: return@LaunchedEffect
-            if (theater != null) return@LaunchedEffect
-            while (withTimeoutOrNull(60_000) { inputEvents.receive() } != null) Unit
+            if (theater != null || !theaterEnabled || !isForeground) return@LaunchedEffect
+            while (withTimeoutOrNull(idleMinutes * 60_000L) { inputEvents.receive() } != null) Unit
             findTheaterFeature(
-                catalog.sections.filter { it.page == currentPage }.flatMap { it.items },
+                launcherMovieSections(catalog).flatMap { it.items },
                 recentTheater,
             )?.let {
                 theater = it
@@ -259,6 +311,32 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
 }
 
 internal fun mediaKey(item: MediaItem) = "${item.mediaType}-${item.id}"
+
+private fun launcherMovieSections(catalog: CatalogResult): List<CatalogSection> {
+    val preferred = listOf("Now in cinemas", "Popular new releases", "Coming soon", "Trending this week")
+        .mapNotNull { title -> catalog.sections.firstOrNull { it.title == title && it.items.isNotEmpty() } }
+    return preferred.ifEmpty { catalog.sections.filter { it.items.isNotEmpty() }.take(4) }
+}
+
+@Suppress("DEPRECATION")
+private fun installedTvApps(context: Context): List<LauncherApp> {
+    val manager = context.packageManager
+    val intents = listOf(
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER),
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
+    )
+    return intents.flatMap { manager.queryIntentActivities(it, 0) }
+        .filter { it.activityInfo.packageName != context.packageName }
+        .distinctBy { it.activityInfo.packageName }
+        .map {
+            LauncherApp(
+                it.loadLabel(manager).toString(),
+                ComponentName(it.activityInfo.packageName, it.activityInfo.name),
+                it.loadIcon(manager),
+            )
+        }
+        .sortedBy { it.name.lowercase() }
+}
 
 internal fun nextDiscoveryItem(items: List<MediaItem>, recent: List<String>): MediaItem? {
     val unseen = items.filterNot { mediaKey(it) in recent }
@@ -515,178 +593,203 @@ private fun artworkModel(url: String, fade: Boolean = false): ImageRequest {
 @Composable
 private fun Home(
     catalog: CatalogResult,
-    selectedCategory: Int,
-    onCategory: (Int) -> Unit,
+    apps: List<LauncherApp>,
+    onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
+    onSettings: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    val restoreTop: () -> Unit = {
-        scope.launch {
-            delay(140)
-            listState.animateScrollToItem(0)
-        }
-    }
-
-    LaunchedEffect(selectedCategory) { listState.scrollToItem(0) }
-
-    Column(Modifier.fillMaxSize()) {
-        Header(
-            categories = CatalogRepository.pageTitles,
-            selectedCategory = selectedCategory,
-            isDemo = catalog.isDemo,
-            onCategory = onCategory,
-            onFocus = restoreTop,
-            onSearch = onSearch,
-        )
-        CategoryPage(catalog.sections.filter { it.page == selectedCategory }, selectedCategory, listState, onSelect)
-    }
-}
-
-@Composable
-private fun CategoryPage(sections: List<CatalogSection>, page: Int, listState: LazyListState, onSelect: (MediaItem) -> Unit) {
+    val searchFocus = remember { FocusRequester() }
+    val sections = launcherMovieSections(catalog)
     val featured = sections.first()
     var hero by remember(featured) { mutableStateOf(featured.items.first()) }
-    var recent by remember(page) { mutableStateOf(listOf(mediaKey(hero))) }
-    LaunchedEffect(featured, hero) {
+    var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
+    LaunchedEffect(hero) {
         delay(10_000)
         nextDiscoveryItem(featured.items, recent)?.let {
             hero = it
             recent = (recent + mediaKey(it)).takeLast(10)
         }
     }
-    val tint = listOf(Violet, Coral, Color(0xFF5B8CFF), Color(0xFF24B8A6), Color(0xFFFFB24A))[page]
-
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.background(
-            Brush.linearGradient(listOf(tint.copy(alpha = .10f), Background.copy(alpha = .02f), Color.Transparent)),
-        ),
-        contentPadding = PaddingValues(top = 24.dp, bottom = 48.dp),
-        verticalArrangement = Arrangement.spacedBy(28.dp),
-    ) {
-        item { Hero(hero, onSelect) }
-        sections.forEach { section -> item(key = section.title) { MediaRow(section, onSelect) } }
-        item {
-            Text(
-                "Data and images by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
-                color = Color.White.copy(alpha = .42f),
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 48.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun Header(
-    categories: List<String>,
-    selectedCategory: Int,
-    isDemo: Boolean,
-    onCategory: (Int) -> Unit,
-    onFocus: () -> Unit,
-    onSearch: () -> Unit,
-) {
-    val firstFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        delay(140)
-        firstFocus.requestFocus()
-    }
-    Column(
-        Modifier.fillMaxWidth().background(
-            Brush.horizontalGradient(listOf(Surface, Color(0xFF20172D), Surface)),
-        ),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(92.dp).padding(horizontal = 48.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Column(Modifier.fillMaxSize()) {
+        LauncherHeader(catalog.isDemo, searchFocus, onSearch, onSettings)
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(top = 22.dp, bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(30.dp),
         ) {
-            BrandSearch(Modifier.focusRequester(firstFocus), onFocus, onSearch)
-            Spacer(Modifier.width(24.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f).focusGroup()) {
-                itemsIndexed(categories) { index, title ->
-                    CategoryChip(title, selected = index == selectedCategory, onFocus = onFocus) { onCategory(index) }
-                }
-            }
-            if (isDemo) {
-                Text("DEMO", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            item { AppDock(apps, searchFocus, onLaunch) }
+            item { Hero(hero, onSelect) }
+            sections.forEach { section -> item(key = section.title) { MediaRow(section, onSelect) } }
+            item {
+                Text(
+                    "Movie data and images by TMDB · Availability by JustWatch",
+                    color = Color.White.copy(alpha = .38f),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 48.dp),
+                )
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Violet.copy(alpha = .22f)))
     }
 }
 
 @Composable
-private fun BrandSearch(modifier: Modifier = Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        if (focused) 1.025f else 1f,
-        spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
-        label = "search focus",
-    )
+private fun LauncherHeader(
+    isDemo: Boolean,
+    searchFocus: FocusRequester,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    var clock by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            clock = LocalTime.now()
+        }
+    }
     Row(
-        modifier
-            .width(210.dp)
-            .height(62.dp)
-            .zIndex(if (focused) 1f else 0f)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocus()
-            }
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (focused) Color.White else Color.Transparent)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp),
+        Modifier.fillMaxWidth().height(88.dp).padding(horizontal = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Image(painterResource(R.drawable.reelora_mark), "Search Reelora", Modifier.size(46.dp))
+        Image(painterResource(R.drawable.reelora_mark), "Reelora", Modifier.size(48.dp))
+        Spacer(Modifier.width(12.dp))
+        Text("REELORA", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp, letterSpacing = 3.sp)
+        if (isDemo) Text("  DEMO", color = Coral, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.weight(1f))
+        Text(clock.format(DateTimeFormatter.ofPattern("HH:mm")), color = Color.White.copy(alpha = .72f), fontSize = 18.sp)
+        Spacer(Modifier.width(22.dp))
+        HeaderAction("Search", "⌕", onSearch, Modifier.focusRequester(searchFocus))
         Spacer(Modifier.width(10.dp))
-        AnimatedContent(
-            targetState = focused,
-            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
-            label = "brand search",
-        ) { isFocused ->
-            Text(
-                if (isFocused) "SEARCH" else "REELORA",
-                color = if (isFocused) Background else Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                letterSpacing = 2.sp,
-            )
+        HeaderAction("Settings", "⚙", onSettings)
+    }
+}
+
+@Composable
+private fun HeaderAction(label: String, glyph: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier.height(48.dp).onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (focused) Color.White else Color.White.copy(alpha = .08f))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(glyph, color = if (focused) Background else Color.White, fontSize = 19.sp)
+        if (focused) {
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = Background, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
-private fun CategoryChip(title: String, selected: Boolean, onFocus: () -> Unit, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        if (focused) 1.025f else 1f,
-        spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
-        label = "category focus",
-    )
-    val background = when {
-        focused -> Color.White
-        selected -> Violet.copy(alpha = .32f)
-        else -> Color.White.copy(alpha = .08f)
+private fun AppDock(apps: List<LauncherApp>, headerFocus: FocusRequester, onLaunch: (LauncherApp) -> Unit) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(apps) {
+        if (apps.isNotEmpty()) {
+            delay(160)
+            first.requestFocus()
+        }
     }
-    Box(
-        Modifier
-            .zIndex(if (focused) 1f else 0f)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocus()
+    Column {
+        Text("Apps", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
+        Spacer(Modifier.height(12.dp))
+        if (apps.isEmpty()) {
+            Text("No TV apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.padding(horizontal = 48.dp))
+        } else LazyRow(
+            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.focusGroup(),
+        ) {
+            itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
+                AppCard(
+                    app,
+                    onLaunch,
+                    if (index == 0) Modifier.focusRequester(first).focusProperties { up = headerFocus } else Modifier,
+                )
             }
-            .clip(RoundedCornerShape(20.dp))
-            .background(background)
-            .then(if (selected && !focused) Modifier.border(1.dp, Violet, RoundedCornerShape(20.dp)) else Modifier)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 17.dp, vertical = 9.dp)
+        }
+    }
+}
+
+@Composable
+private fun AppCard(app: LauncherApp, onLaunch: (LauncherApp) -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        modifier.width(126.dp).zIndex(if (focused) 1f else 0f).graphicsLayer {
+            scaleX = if (focused) 1.08f else 1f
+            scaleY = if (focused) 1.08f else 1f
+        }.onFocusChanged { focused = it.isFocused }.clickable(role = Role.Button) { onLaunch(app) },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(title, color = if (focused) Background else Color.White.copy(alpha = .78f), fontSize = 14.sp)
+        Box(
+            Modifier.size(112.dp).clip(RoundedCornerShape(24.dp))
+                .background(if (focused) Color.White else Color.White.copy(alpha = .09f))
+                .border(if (focused) 3.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = .10f), RoundedCornerShape(24.dp))
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(model = app.icon, contentDescription = app.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+        }
+        Spacer(Modifier.height(9.dp))
+        Text(app.name, color = Color.White.copy(alpha = if (focused) 1f else .72f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    theaterEnabled: Boolean,
+    idleMinutes: Int,
+    onTheaterEnabled: (Boolean) -> Unit,
+    onIdleMinutes: (Int) -> Unit,
+    onSystemSettings: () -> Unit,
+    onHomeSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val first = remember { FocusRequester() }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        LaunchedEffect(Unit) {
+            delay(350)
+            first.requestFocus()
+        }
+        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .88f)), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.width(680.dp).clip(RoundedCornerShape(28.dp))
+                    .background(Brush.verticalGradient(listOf(Color(0xFF242433), Color(0xFF12121B))))
+                    .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(28.dp)).padding(32.dp),
+            ) {
+                Text("Settings", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                Text("A simple home for apps and movies", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
+                Spacer(Modifier.height(28.dp))
+                Text("THEATER", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ActionButton(
+                        if (theaterEnabled) "Theater on" else "Theater off",
+                        modifier = Modifier.focusRequester(first),
+                        glyph = if (theaterEnabled) "●" else "○",
+                    ) {
+                        onTheaterEnabled(!theaterEnabled)
+                    }
+                    ActionButton("Starts after $idleMinutes min", glyph = "◷") {
+                        onIdleMinutes(when (idleMinutes) { 1 -> 3; 3 -> 5; else -> 1 })
+                    }
+                }
+                Spacer(Modifier.height(28.dp))
+                Text("SYSTEM", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ActionButton("Choose default home", glyph = "⌂", onClick = onHomeSettings)
+                    ActionButton("Android settings", glyph = "⚙", onClick = onSystemSettings)
+                }
+                Spacer(Modifier.height(28.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    ActionButton("Done", glyph = "✓", onClick = onDismiss)
+                }
+            }
+        }
     }
 }
 
