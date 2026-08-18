@@ -146,11 +146,29 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
         var theaterOpen by remember { mutableStateOf(false) }
         val context = LocalContext.current
-        val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val theaterScope = rememberCoroutineScope()
+        val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
             theaterOpen = false
-            theater = null
-            selected = theaterReturn
-            theaterReturn = null
+            val manualReturn = theaterReturn
+            if (resultCode.resultCode == TrailerActivity.RESULT_UNAVAILABLE && manualReturn != null) {
+                android.widget.Toast.makeText(context, "Trailer unavailable or blocked in your region", android.widget.Toast.LENGTH_LONG).show()
+            }
+            if (resultCode.resultCode in setOf(TrailerActivity.RESULT_FINISHED, TrailerActivity.RESULT_UNAVAILABLE) && manualReturn == null) {
+                val catalog = result
+                theaterScope.launch {
+                    theater = catalog?.let {
+                        findTheaterFeature(
+                            it.sections.filter { section -> section.page == currentPage }.flatMap { section -> section.items },
+                            recentTheater,
+                        )
+                    }
+                    theater?.let { recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10) }
+                }
+            } else {
+                theater = null
+                selected = manualReturn
+                theaterReturn = null
+            }
         }
         LaunchedEffect(Unit) { result = CatalogRepository.load() }
 
@@ -158,6 +176,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
             val feature = theater ?: return@LaunchedEffect
             val intent = Intent(context, TrailerActivity::class.java)
                 .putExtra("videoId", feature.trailer.key)
+                .putExtra("manual", theaterReturn != null)
             if (theaterOpen) context.startActivity(intent) else {
                 theaterOpen = true
                 theaterLauncher.launch(intent)
@@ -230,20 +249,6 @@ private fun ReeloraApp(inputEvents: Channel<Unit>) {
                 recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
             }
         }
-        LaunchedEffect(theater?.item?.let(::mediaKey)) {
-            val current = theater ?: return@LaunchedEffect
-            delay(45_000)
-            val catalog = result ?: return@LaunchedEffect
-            findTheaterFeature(
-                catalog.sections.filter { it.page == currentPage }.flatMap { it.items },
-                recentTheater,
-            )?.let {
-                if (theater == current) {
-                    theater = it
-                    recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
-                }
-            }
-        }
     }
 }
 
@@ -268,7 +273,13 @@ private suspend fun findTheaterFeature(items: List<MediaItem>, recent: List<Stri
 
 @SuppressLint("SetJavaScriptEnabled")
 class TrailerActivity : Activity() {
+    companion object {
+        const val RESULT_FINISHED = RESULT_FIRST_USER
+        const val RESULT_UNAVAILABLE = RESULT_FIRST_USER + 1
+    }
+
     private lateinit var player: WebView
+    private var manual = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -284,8 +295,19 @@ class TrailerActivity : Activity() {
                         null,
                     )
                 }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    view.evaluateJavascript(
+                        """(()=>{if(window.reeloraWatching)return;window.reeloraWatching=true;let started=false;document.addEventListener('playing',()=>started=true,true);let timer=setInterval(()=>{let video=document.querySelector('video');if(video){clearInterval(timer);video.addEventListener('ended',()=>{if(!document.querySelector('.ad-showing'))Reelora.onEnded()})}},500);setTimeout(()=>{let video=document.querySelector('video');if(!started&&!(video&&video.currentTime>0))Reelora.onUnavailable()},15000)})()""",
+                        null,
+                    )
+                }
             }
+            addJavascriptInterface(PlayerBridge(), "Reelora")
             setBackgroundColor(android.graphics.Color.BLACK)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            requestFocus()
         }
         setContentView(player)
         play(intent)
@@ -297,6 +319,7 @@ class TrailerActivity : Activity() {
     }
 
     private fun play(intent: Intent) {
+        manual = intent.getBooleanExtra("manual", false)
         val videoId = intent.getStringExtra("videoId").orEmpty()
             .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
         player.loadUrl(
@@ -306,12 +329,26 @@ class TrailerActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) {
+        if (event.action == KeyEvent.ACTION_DOWN && (manual && event.keyCode == KeyEvent.KEYCODE_BACK || !manual)) {
             setResult(RESULT_OK)
             finish()
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private inner class PlayerBridge {
+        @android.webkit.JavascriptInterface
+        fun onEnded() = runOnUiThread {
+            setResult(RESULT_FINISHED)
+            finish()
+        }
+
+        @android.webkit.JavascriptInterface
+        fun onUnavailable() = runOnUiThread {
+            setResult(RESULT_UNAVAILABLE)
+            finish()
+        }
     }
 
     override fun onDestroy() {
