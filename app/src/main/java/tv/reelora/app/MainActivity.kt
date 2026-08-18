@@ -11,8 +11,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -84,6 +91,8 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -117,6 +126,7 @@ private fun ReeloraApp() {
         LaunchedEffect(Unit) { result = CatalogRepository.load() }
 
         Box(Modifier.fillMaxSize().background(Background)) {
+            AmbientBackdrop()
             val catalog = result
             if (catalog == null) {
                 Loading()
@@ -147,15 +157,141 @@ private fun ReeloraApp() {
 
 @Composable
 private fun Loading() {
+    val motion = rememberInfiniteTransition(label = "loading")
+    val pulse by motion.animateFloat(
+        initialValue = .96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(tween(1_400), RepeatMode.Reverse),
+        label = "loading pulse",
+    )
+    val progress by motion.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1_500, easing = LinearEasing)),
+        label = "loading progress",
+    )
     Column(
         Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Image(painterResource(R.drawable.reelora_mark), "Reelora TV", Modifier.size(88.dp))
+        Image(
+            painterResource(R.drawable.reelora_mark),
+            "Reelora TV",
+            Modifier.size(88.dp).graphicsLayer {
+                scaleX = pulse
+                scaleY = pulse
+                alpha = .82f + (pulse - .96f) * 2f
+            },
+        )
         Spacer(Modifier.height(16.dp))
         Text("Finding something great…", color = Color.White.copy(alpha = .72f), fontSize = 18.sp)
+        Spacer(Modifier.height(18.dp))
+        Box(
+            Modifier.width(124.dp).height(3.dp).clip(CircleShape).background(Color.White.copy(alpha = .10f)),
+        ) {
+            Box(
+                Modifier.width(46.dp).fillMaxHeight().graphicsLayer { translationX = (progress + 1f) * 39.dp.toPx() }
+                    .background(Brush.horizontalGradient(listOf(Violet, Coral)), CircleShape),
+            )
+        }
     }
+}
+
+@Composable
+private fun AmbientBackdrop() {
+    val motion = rememberInfiniteTransition(label = "ambient background")
+    val drift by motion.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(18_000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "ambient drift",
+    )
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.size(560.dp).align(Alignment.TopEnd).graphicsLayer {
+                translationX = drift * 54.dp.toPx()
+                translationY = (drift + 1f) * 26.dp.toPx()
+                alpha = .24f
+            }.background(
+                Brush.radialGradient(listOf(Violet.copy(alpha = .7f), Color.Transparent)),
+                CircleShape,
+            ),
+        )
+        Box(
+            Modifier.size(460.dp).align(Alignment.BottomStart).graphicsLayer {
+                translationX = -drift * 44.dp.toPx()
+                translationY = -(drift + 1f) * 18.dp.toPx()
+                alpha = .15f
+            }.background(
+                Brush.radialGradient(listOf(Coral.copy(alpha = .65f), Color.Transparent)),
+                CircleShape,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun LoadingBlock(width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp) {
+    val motion = rememberInfiniteTransition(label = "loading block")
+    val alpha by motion.animateFloat(
+        initialValue = .07f,
+        targetValue = .15f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "loading block alpha",
+    )
+    Box(
+        Modifier.width(width).height(height).clip(RoundedCornerShape(radius))
+            .background(Brush.linearGradient(listOf(Color.White.copy(alpha = alpha), Violet.copy(alpha = alpha * .55f)))),
+    )
+}
+
+@Composable
+private fun LoadingPosterRow() {
+    val motion = rememberInfiniteTransition(label = "poster loading")
+    val alpha by motion.animateFloat(
+        initialValue = .07f,
+        targetValue = .15f,
+        animationSpec = infiniteRepeatable(tween(950), RepeatMode.Reverse),
+        label = "poster loading alpha",
+    )
+    Row(
+        Modifier.height(264.dp).padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        repeat(5) {
+            Box(
+                Modifier.width(176.dp).height(248.dp).clip(RoundedCornerShape(14.dp))
+                    .background(Brush.linearGradient(listOf(Color.White.copy(alpha = alpha), Violet.copy(alpha = alpha * .55f)))),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingCastRow() {
+    val motion = rememberInfiniteTransition(label = "cast loading")
+    val alpha by motion.animateFloat(
+        initialValue = .07f,
+        targetValue = .15f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "cast loading alpha",
+    )
+    Row(Modifier.height(98.dp).padding(horizontal = 6.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        repeat(8) {
+            Column(Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(58.dp).background(Color.White.copy(alpha = alpha), CircleShape))
+                Spacer(Modifier.height(7.dp))
+                Box(Modifier.width(68.dp).height(8.dp).background(Color.White.copy(alpha = alpha), CircleShape))
+            }
+        }
+    }
+}
+
+@Composable
+private fun artworkModel(url: String): ImageRequest {
+    val context = LocalContext.current
+    return remember(url) { ImageRequest.Builder(context).data(url).crossfade(220).build() }
 }
 
 @Composable
@@ -226,7 +362,11 @@ private fun Header(
         delay(140)
         firstFocus.requestFocus()
     }
-    Column(Modifier.fillMaxWidth().background(Surface)) {
+    Column(
+        Modifier.fillMaxWidth().background(
+            Brush.horizontalGradient(listOf(Surface, Color(0xFF20172D), Surface)),
+        ),
+    ) {
         Row(
             Modifier.fillMaxWidth().height(92.dp).padding(horizontal = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -249,7 +389,11 @@ private fun Header(
 @Composable
 private fun BrandSearch(modifier: Modifier = Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.035f else 1f, spring(stiffness = Spring.StiffnessMediumLow), label = "search focus")
+    val scale by animateFloatAsState(
+        if (focused) 1.025f else 1f,
+        spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
+        label = "search focus",
+    )
     Row(
         modifier
             .width(210.dp)
@@ -287,7 +431,11 @@ private fun BrandSearch(modifier: Modifier = Modifier, onFocus: () -> Unit, onCl
 @Composable
 private fun CategoryChip(title: String, selected: Boolean, onFocus: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.045f else 1f, spring(stiffness = Spring.StiffnessMediumLow), label = "category focus")
+    val scale by animateFloatAsState(
+        if (focused) 1.025f else 1f,
+        spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
+        label = "category focus",
+    )
     val background = when {
         focused -> Color.White
         selected -> Violet.copy(alpha = .32f)
@@ -317,6 +465,7 @@ private fun SearchDialog(
     onDismiss: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
+    var entered by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<MediaItem>()) }
     var loading by remember { mutableStateOf(false) }
@@ -337,8 +486,9 @@ private fun SearchDialog(
     }
 
     LaunchedEffect(Unit) {
-        inputRequester.requestFocus()
+        entered = true
         delay(120)
+        inputRequester.requestFocus()
         keyboard?.show()
     }
     LaunchedEffect(query) {
@@ -348,28 +498,38 @@ private fun SearchDialog(
             loading = false
             return@LaunchedEffect
         }
-        delay(350)
         loading = true
+        delay(350)
         results = CatalogRepository.search(term)
         loading = false
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
+        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .94f)), contentAlignment = Alignment.Center) {
+          AmbientBackdrop()
+          AnimatedVisibility(
+            visible = entered,
+            enter = fadeIn(tween(180)) + scaleIn(
+                initialScale = .965f,
+                animationSpec = spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
+            ),
+            label = "search dialog",
+          ) {
+           Column(
+             Modifier
                 .fillMaxWidth(.92f)
                 .fillMaxHeight(.88f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF10101B))
-                .border(1.dp, Color.White.copy(alpha = .14f), RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(26.dp))
+                .background(Brush.verticalGradient(listOf(Color(0xF21B1B2B), Color(0xF20D0D16))))
+                .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp))
                 .padding(30.dp),
-        ) {
+           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Search", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                     Text("Movies, series and animation", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
                 }
-                ActionButton("Close", onClick = onDismiss)
+                ActionButton("Close", glyph = "×", onClick = onDismiss)
             }
             Spacer(Modifier.height(22.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -404,7 +564,7 @@ private fun SearchDialog(
                         }
                     },
                 )
-                if (voiceAvailable) ActionButton("Voice") { voice.launch(voiceIntent) }
+                if (voiceAvailable) ActionButton("Voice", glyph = "✦") { voice.launch(voiceIntent) }
             }
             Spacer(Modifier.height(24.dp))
             val shown = if (query.trim().length < 2) suggestions else results
@@ -420,18 +580,24 @@ private fun SearchDialog(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
-            LazyRow(
-                contentPadding = PaddingValues(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.focusGroup(),
-            ) {
-                items(shown, key = { "${it.mediaType}-${it.id}" }) { item ->
-                    PosterCard(item, onSelect = {
-                        keyboard?.hide()
-                        onSelect(item)
-                    })
+            if (loading) {
+                LoadingPosterRow()
+            } else {
+                LazyRow(
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.focusGroup(),
+                ) {
+                    items(shown, key = { "${it.mediaType}-${it.id}" }) { item ->
+                        PosterCard(item, onSelect = {
+                            keyboard?.hide()
+                            onSelect(item)
+                        })
+                    }
                 }
             }
+           }
+          }
         }
     }
 }
@@ -461,7 +627,7 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit) {
         ) { featured ->
             featured.backdropUrl?.let {
                 AsyncImage(
-                    model = it,
+                    model = artworkModel(it),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -554,7 +720,7 @@ private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier:
             .clickable(role = Role.Button) { onSelect(item) }
     ) {
         if (item.posterUrl != null) {
-            AsyncImage(item.posterUrl, item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            AsyncImage(artworkModel(item.posterUrl), item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(88.dp).align(Alignment.Center))
         }
@@ -587,12 +753,13 @@ private fun ActionButton(
     text: String,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
+    glyph: String? = null,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        if (focused) 1.065f else 1f,
-        spring(dampingRatio = .78f, stiffness = Spring.StiffnessMediumLow),
+        if (focused) 1.045f else 1f,
+        spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
         label = "button focus",
     )
     Box(
@@ -608,12 +775,18 @@ private fun ActionButton(
                 if (it.isFocused) onFocused()
             }
             .clip(RoundedCornerShape(10.dp))
-            .background(if (focused) Color.White else Violet)
+            .background(
+                if (focused) Brush.horizontalGradient(listOf(Color.White, Color(0xFFECE5FF)))
+                else Brush.horizontalGradient(listOf(Violet, Color(0xFF7652E8))),
+            )
             .border(if (focused) 2.dp else 0.dp, if (focused) Coral else Color.Transparent, RoundedCornerShape(10.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 11.dp)
     ) {
-        Text(text, color = if (focused) Background else Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            glyph?.let { Text(it, color = if (focused) Coral else Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold) }
+            Text(text, color = if (focused) Background else Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
     }
 }
 
@@ -624,6 +797,7 @@ private fun DetailsDialog(
     onDismiss: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
+    var entered by remember(item.id) { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -634,52 +808,78 @@ private fun DetailsDialog(
     var selectedActor by remember(item.id) { mutableStateOf<CastMember?>(null) }
     var actorTitles by remember(item.id) { mutableStateOf<List<MediaItem>?>(null) }
     var actorLoading by remember(item.id) { mutableStateOf(false) }
-    val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: details?.let { item.backdropUrl }
+    val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: item.backdropUrl
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
     var artworkReady by remember(artwork) { mutableStateOf(false) }
-    val artworkAlpha by animateFloatAsState(if (artworkReady) .42f else 0f, tween(500), label = "details artwork")
+    val artworkAlpha by animateFloatAsState(if (artworkReady) .52f else 0f, tween(500), label = "details artwork")
+    val artworkMotion = rememberInfiniteTransition(label = "details artwork motion")
+    val artworkDrift by artworkMotion.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(24_000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "details artwork drift",
+    )
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
       Box(Modifier.fillMaxSize().background(Background), contentAlignment = Alignment.Center) {
-        artwork?.let {
-            AsyncImage(
-                model = it,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                onSuccess = { artworkReady = true },
-                modifier = Modifier.fillMaxSize().graphicsLayer {
-                    alpha = artworkAlpha
-                    scaleX = 1.04f
-                    scaleY = 1.04f
-                },
-            )
-        }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to Background.copy(alpha = .35f),
-                    .55f to Background.copy(alpha = .72f),
-                    1f to Background,
-                )
-            )
-        )
-        LazyColumn(
+        AnimatedVisibility(
+          visible = entered,
+          enter = fadeIn(tween(180)) + scaleIn(
+              initialScale = .965f,
+              animationSpec = spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
+          ),
+          modifier = Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f),
+          label = "details dialog",
+        ) {
+         Box(
+           Modifier.fillMaxSize().clip(RoundedCornerShape(26.dp))
+             .background(Color(0xFF11111C))
+             .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp)),
+         ) {
+          AmbientBackdrop()
+          artwork?.let {
+              AsyncImage(
+                  model = artworkModel(it),
+                  contentDescription = null,
+                  contentScale = ContentScale.Crop,
+                  onSuccess = { artworkReady = true },
+                  modifier = Modifier.fillMaxSize().graphicsLayer {
+                      alpha = artworkAlpha
+                      scaleX = 1.06f + artworkDrift * .01f
+                      scaleY = 1.06f + artworkDrift * .01f
+                      translationX = artworkDrift * 8.dp.toPx()
+                      translationY = artworkDrift * 3.dp.toPx()
+                  },
+              )
+          }
+          Box(
+              Modifier.fillMaxSize().background(
+                  Brush.verticalGradient(
+                      0f to Background.copy(alpha = .24f),
+                      .55f to Background.copy(alpha = .48f),
+                      1f to Background.copy(alpha = .80f),
+                  )
+              )
+          )
+          LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxWidth(.9f)
-                .fillMaxHeight(.92f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF12121E).copy(alpha = .82f))
-                .border(1.dp, Color.White.copy(alpha = .12f), RoundedCornerShape(24.dp)),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 28.dp, top = 28.dp, end = 28.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item { Column {
                 Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionButton("Back", Modifier.focusRequester(requester), restoreTop, onDismiss)
+                    ActionButton(
+                        "Back",
+                        modifier = Modifier.focusRequester(requester),
+                        onFocused = restoreTop,
+                        glyph = "‹",
+                        onClick = onDismiss,
+                    )
                     details?.trailer?.let { trailer ->
-                        ActionButton("Play trailer", onFocused = restoreTop) { openTrailer(context, trailer) }
+                        ActionButton("Play trailer", onFocused = restoreTop, glyph = "▶") { openTrailer(context, trailer) }
                     }
+                    if (details == null) LoadingBlock(132.dp, 42.dp, 10.dp)
                 }
                 Spacer(Modifier.height(18.dp))
                 Row {
@@ -687,7 +887,7 @@ private fun DetailsDialog(
                         Modifier.width(136.dp).height(190.dp).clip(RoundedCornerShape(14.dp))
                             .background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))
                     ) {
-                        if (item.posterUrl != null) AsyncImage(item.posterUrl, item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        if (item.posterUrl != null) AsyncImage(artworkModel(item.posterUrl), item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         else Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(82.dp).align(Alignment.Center))
                     }
                     Spacer(Modifier.width(20.dp))
@@ -738,7 +938,7 @@ private fun DetailsDialog(
                     Text("${actor.name} · Movies & TV${if (actorLoading && titles != null) " · Updating…" else ""}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(10.dp))
                     when {
-                        titles == null -> Text("Finding titles…", color = Color.White.copy(alpha = .55f), fontSize = 14.sp, modifier = Modifier.height(248.dp))
+                        titles == null -> LoadingPosterRow()
                         titles.isEmpty() -> Text("No other titles found", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
                         else -> LazyRow(
                             contentPadding = PaddingValues(8.dp),
@@ -773,10 +973,13 @@ private fun DetailsDialog(
                     }
                 }
             } }
+          }
+         }
         }
       }
     }
     LaunchedEffect(item.id) {
+        entered = true
         listState.scrollToItem(0)
         delay(140)
         requester.requestFocus()
@@ -785,6 +988,7 @@ private fun DetailsDialog(
     LaunchedEffect(selectedActor?.id) {
         selectedActor?.let { actor ->
             actorLoading = true
+            actorTitles = null
             actorTitles = CatalogRepository.credits(actor.id).filterNot { it.id == item.id && it.mediaType == item.mediaType }
             actorLoading = false
         }
@@ -811,7 +1015,7 @@ private fun AvailabilityBadge(availability: WatchAvailability) {
     ) {
         Text(if (streaming) "▶" else if (providers.isNotEmpty()) "\$" else "—", color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         providers.take(3).forEach { provider ->
-            provider.logoUrl?.let { AsyncImage(it, provider.name, Modifier.size(20.dp).clip(RoundedCornerShape(5.dp))) }
+            provider.logoUrl?.let { AsyncImage(artworkModel(it), provider.name, Modifier.size(20.dp).clip(RoundedCornerShape(5.dp))) }
         }
         Text(
             when {
@@ -844,7 +1048,7 @@ private fun CastRow(
     onSelect: (CastMember) -> Unit,
 ) {
     if (cast == null) {
-        Text("Loading cast…", color = Color.White.copy(alpha = .55f), fontSize = 14.sp, modifier = Modifier.height(98.dp))
+        LoadingCastRow()
         return
     }
     if (cast.isEmpty()) {
@@ -883,7 +1087,7 @@ private fun CastCard(person: CastMember, selected: Boolean, downRequester: Focus
             contentAlignment = Alignment.Center,
         ) {
             if (person.profileUrl != null) {
-                AsyncImage(person.profileUrl, person.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                AsyncImage(artworkModel(person.profileUrl), person.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
                 Text(person.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
