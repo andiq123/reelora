@@ -11,8 +11,10 @@ class CatalogRepositoryTest {
     @Test
     fun catalogRoutesCoverDistinctTvSections() {
         val specs = CatalogRepository.specs
-        assertEquals(5, specs.map { it.title }.distinct().size)
-        assertTrue(specs.single { it.title == "Animation" }.path.contains("with_genres=16"))
+        assertEquals(5, CatalogRepository.pageTitles.size)
+        assertEquals(20, specs.map { it.title }.distinct().size)
+        assertTrue(CatalogRepository.pageTitles.indices.all { page -> specs.count { it.page == page } == 4 })
+        assertTrue(specs.single { it.title == "Popular animation" }.path.contains("with_genres=16"))
         assertTrue(specs.any { it.mediaType == "tv" })
     }
 

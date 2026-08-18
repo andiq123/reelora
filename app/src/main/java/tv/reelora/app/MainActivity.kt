@@ -276,33 +276,38 @@ private fun Home(catalog: CatalogResult, onSearch: () -> Unit, onSelect: (MediaI
 
     Column(Modifier.fillMaxSize()) {
         Header(
-            categories = catalog.sections.map { it.title },
+            categories = CatalogRepository.pageTitles,
             selectedCategory = selectedCategory,
             isDemo = catalog.isDemo,
             onCategory = { selectedCategory = it },
             onFocus = restoreTop,
             onSearch = onSearch,
         )
-        CategoryPage(catalog.sections[selectedCategory], listState, onSelect)
+        CategoryPage(catalog.sections.filter { it.page == selectedCategory }, selectedCategory, listState, onSelect)
     }
 }
 
 @Composable
-private fun CategoryPage(section: CatalogSection, listState: LazyListState, onSelect: (MediaItem) -> Unit) {
-    var hero by remember(section) { mutableStateOf(section.items.first()) }
-    LaunchedEffect(section, hero) {
+private fun CategoryPage(sections: List<CatalogSection>, page: Int, listState: LazyListState, onSelect: (MediaItem) -> Unit) {
+    val featured = sections.first()
+    var hero by remember(featured) { mutableStateOf(featured.items.first()) }
+    LaunchedEffect(featured, hero) {
         delay(10_000)
-        val next = (section.items.indexOfFirst { it.id == hero.id } + 1).mod(section.items.size)
-        hero = section.items[next]
+        val next = (featured.items.indexOfFirst { it.id == hero.id } + 1).mod(featured.items.size)
+        hero = featured.items[next]
     }
+    val tint = listOf(Violet, Coral, Color(0xFF5B8CFF), Color(0xFF24B8A6), Color(0xFFFFB24A))[page]
 
     LazyColumn(
         state = listState,
+        modifier = Modifier.background(
+            Brush.linearGradient(listOf(tint.copy(alpha = .10f), Background.copy(alpha = .02f), Color.Transparent)),
+        ),
         contentPadding = PaddingValues(top = 24.dp, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         item { Hero(hero, onSelect) }
-        item { MediaRow(section, onSelect) }
+        sections.forEach { section -> item(key = section.title) { MediaRow(section, onSelect) } }
         item {
             Text(
                 "Data and images by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",

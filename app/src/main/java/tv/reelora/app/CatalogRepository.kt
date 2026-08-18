@@ -45,19 +45,42 @@ data class MediaDetails(
     val availability: WatchAvailability?,
     val backdrops: List<String>,
 )
-data class CatalogSection(val title: String, val items: List<MediaItem>)
+data class CatalogSection(val page: Int, val title: String, val items: List<MediaItem>)
 data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
-data class CatalogSpec(val title: String, val path: String, val mediaType: String)
+data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 
 object CatalogRepository {
     private val personCredits = mutableMapOf<Int, List<MediaItem>>()
+    private val today = LocalDate.now().format(DateTimeFormatter.ISO_DATE)
+    private val recentDate = LocalDate.now().minusMonths(8).format(DateTimeFormatter.ISO_DATE)
+
+    val pageTitles = listOf("Discover", "In cinemas", "Movies", "TV series", "Animation")
 
     val specs = listOf(
-        CatalogSpec("Trending now", "/trending/all/day", "movie"),
-        CatalogSpec("In cinemas", "/movie/now_playing", "movie"),
-        CatalogSpec("Popular movies", "/movie/popular", "movie"),
-        CatalogSpec("TV series", "/tv/popular", "tv"),
-        CatalogSpec("Animation", "/discover/movie?with_genres=16&sort_by=popularity.desc", "movie"),
+        CatalogSpec(0, "Trending today", "/trending/all/day", "movie"),
+        CatalogSpec(0, "Trending this week", "/trending/all/week", "movie"),
+        CatalogSpec(0, "Highly rated", "/discover/movie?sort_by=vote_average.desc&vote_count.gte=1000", "movie"),
+        CatalogSpec(0, "Hidden gems", "/discover/movie?sort_by=vote_average.desc&vote_count.gte=250&vote_count.lte=1500", "movie"),
+
+        CatalogSpec(1, "Now in cinemas", "/movie/now_playing", "movie"),
+        CatalogSpec(1, "Coming soon", "/movie/upcoming", "movie"),
+        CatalogSpec(1, "Popular new releases", "/discover/movie?sort_by=popularity.desc&primary_release_date.gte=$recentDate&primary_release_date.lte=$today", "movie"),
+        CatalogSpec(1, "More coming soon", "/movie/upcoming?page=2", "movie"),
+
+        CatalogSpec(2, "Popular movies", "/movie/popular", "movie"),
+        CatalogSpec(2, "Top rated movies", "/movie/top_rated", "movie"),
+        CatalogSpec(2, "Action & adventure", "/discover/movie?with_genres=28|12&sort_by=popularity.desc", "movie"),
+        CatalogSpec(2, "Science fiction", "/discover/movie?with_genres=878&sort_by=popularity.desc", "movie"),
+
+        CatalogSpec(3, "Popular series", "/tv/popular", "tv"),
+        CatalogSpec(3, "Airing today", "/tv/airing_today", "tv"),
+        CatalogSpec(3, "Currently on air", "/tv/on_the_air", "tv"),
+        CatalogSpec(3, "Top rated series", "/tv/top_rated", "tv"),
+
+        CatalogSpec(4, "Popular animation", "/discover/movie?with_genres=16&sort_by=popularity.desc", "movie"),
+        CatalogSpec(4, "For the whole family", "/discover/movie?with_genres=16,10751&sort_by=popularity.desc", "movie"),
+        CatalogSpec(4, "Anime movies", "/discover/movie?with_genres=16&with_origin_country=JP&sort_by=popularity.desc", "movie"),
+        CatalogSpec(4, "Animated series", "/discover/tv?with_genres=16&sort_by=popularity.desc", "tv"),
     )
 
     suspend fun load(): CatalogResult = withContext(Dispatchers.Default) {
@@ -66,9 +89,13 @@ object CatalogRepository {
 
         runCatching {
             val sections = coroutineScope {
-                specs.map { spec -> async { fetch(spec, token) } }.awaitAll()
+                specs.map { spec -> async { runCatching { fetch(spec, token) }.getOrNull() } }.awaitAll().filterNotNull()
             }
-            CatalogResult(sections, false)
+            val demo = fallback().sections
+            CatalogResult(
+                pageTitles.indices.flatMap { page -> sections.filter { it.page == page }.ifEmpty { demo.filter { it.page == page } } },
+                sections.isEmpty(),
+            )
         }.getOrElse { fallback() }
     }
 
@@ -168,7 +195,7 @@ object CatalogRepository {
 
     private suspend fun fetch(spec: CatalogSpec, token: String): CatalogSection {
         val results = getJson(spec.path, token).getJSONArray("results")
-        return CatalogSection(spec.title, parseItems(results, spec.mediaType))
+        return CatalogSection(spec.page, spec.title, parseItems(results, spec.mediaType))
     }
 
     private fun parseItems(results: JSONArray, defaultType: String, limit: Int = 18) = buildList {
@@ -229,7 +256,7 @@ object CatalogRepository {
             MediaItem(8, "Tiny Giants", "Small creatures embark on a very big animated expedition.", "2026", 8.5, 1206, "movie", null, null),
         )
         return CatalogResult(
-            specs.mapIndexed { index, spec -> CatalogSection(spec.title, List(demos.size) { demos[(it + index) % demos.size] }) },
+            specs.mapIndexed { index, spec -> CatalogSection(spec.page, spec.title, List(demos.size) { demos[(it + index) % demos.size] }) },
             true,
         )
     }
