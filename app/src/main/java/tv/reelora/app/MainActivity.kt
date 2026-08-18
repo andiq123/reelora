@@ -305,9 +305,8 @@ class TrailerActivity : Activity() {
             }
             addJavascriptInterface(PlayerBridge(), "Reelora")
             setBackgroundColor(android.graphics.Color.BLACK)
-            isFocusable = true
-            isFocusableInTouchMode = true
-            requestFocus()
+            isFocusable = false
+            isFocusableInTouchMode = false
         }
         setContentView(player)
         play(intent)
@@ -320,6 +319,11 @@ class TrailerActivity : Activity() {
 
     private fun play(intent: Intent) {
         manual = intent.getBooleanExtra("manual", false)
+        if (manual) android.widget.Toast.makeText(
+            this,
+            "← →  Seek 10s   •   OK  Play/Pause   •   Back  Close",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
         val videoId = intent.getStringExtra("videoId").orEmpty()
             .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
         player.loadUrl(
@@ -329,12 +333,25 @@ class TrailerActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && (manual && event.keyCode == KeyEvent.KEYCODE_BACK || !manual)) {
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+        if (!manual || event.keyCode == KeyEvent.KEYCODE_BACK) {
             setResult(RESULT_OK)
             finish()
             return true
         }
-        return super.dispatchKeyEvent(event)
+        val script = when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_REWIND ->
+                "document.querySelector('video').currentTime=Math.max(0,document.querySelector('video').currentTime-10)"
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ->
+                "document.querySelector('video').currentTime+=10"
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ->
+                "(()=>{let v=document.querySelector('video');v.paused?v.play():v.pause()})()"
+            KeyEvent.KEYCODE_MEDIA_PLAY -> "document.querySelector('video').play()"
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> "document.querySelector('video').pause()"
+            else -> return super.dispatchKeyEvent(event)
+        }
+        player.evaluateJavascript(script, null)
+        return true
     }
 
     private inner class PlayerBridge {
