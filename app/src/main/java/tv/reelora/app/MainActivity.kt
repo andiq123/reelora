@@ -205,8 +205,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             }
         }
         LaunchedEffect(Unit) {
-            launch { result = CatalogRepository.load() }
-            apps = withContext(Dispatchers.IO) { installedTvApps(context) }
+            result = CatalogRepository.load()
+        }
+        LaunchedEffect(isForeground) {
+            if (isForeground) apps = withContext(Dispatchers.IO) { installedTvApps(context) }
         }
 
         LaunchedEffect(theater?.trailer?.key) {
@@ -244,6 +246,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onLaunch = { app ->
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(app.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }.onFailure {
+                            android.widget.Toast.makeText(context, "Unable to open ${app.name}", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     },
                     onSearch = { searching = true },
@@ -312,6 +316,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 theaterReturn = null
                 selected = null
                 searching = false
+                settingsOpen = false
                 recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
             }
         }
@@ -614,7 +619,7 @@ private fun Home(
     val listState = rememberLazyListState()
     val searchFocus = remember { FocusRequester() }
     val heroFocus = remember { FocusRequester() }
-    val sections = launcherMovieSections(catalog)
+    val sections = remember(catalog) { launcherMovieSections(catalog) }
     val featured = sections.first()
     var hero by remember(featured) { mutableStateOf(featured.items.first()) }
     var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
