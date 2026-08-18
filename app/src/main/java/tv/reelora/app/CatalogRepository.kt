@@ -60,11 +60,11 @@ object CatalogRepository {
         CatalogSpec("Animation", "/discover/movie?with_genres=16&sort_by=popularity.desc", "movie"),
     )
 
-    suspend fun load(): CatalogResult {
+    suspend fun load(): CatalogResult = withContext(Dispatchers.Default) {
         val token = BuildConfig.TMDB_TOKEN.trim()
-        if (token.isEmpty()) return fallback()
+        if (token.isEmpty()) return@withContext fallback()
 
-        return runCatching {
+        runCatching {
             val sections = coroutineScope {
                 specs.map { spec -> async { fetch(spec, token) } }.awaitAll()
             }
@@ -72,11 +72,11 @@ object CatalogRepository {
         }.getOrElse { fallback() }
     }
 
-    suspend fun details(item: MediaItem): MediaDetails {
+    suspend fun details(item: MediaItem): MediaDetails = withContext(Dispatchers.Default) {
         val token = BuildConfig.TMDB_TOKEN.trim()
-        if (token.isEmpty()) return fallbackDetails(item)
+        if (token.isEmpty()) return@withContext fallbackDetails(item)
 
-        return runCatching {
+        runCatching {
             val creditsKey = if (item.mediaType == "tv") "aggregate_credits" else "credits"
             val json = getJson("/${item.mediaType}/${item.id}?append_to_response=$creditsKey,recommendations,videos,watch/providers,images&include_image_language=en,null", token)
             val runtimeMinutes = if (item.mediaType == "tv") {
@@ -139,22 +139,22 @@ object CatalogRepository {
         }.getOrElse { fallbackDetails(item) }
     }
 
-    suspend fun search(query: String): List<MediaItem> {
+    suspend fun search(query: String): List<MediaItem> = withContext(Dispatchers.Default) {
         val term = query.trim()
         val token = BuildConfig.TMDB_TOKEN.trim()
-        if (term.length < 2 || token.isEmpty()) return emptyList()
+        if (term.length < 2 || token.isEmpty()) return@withContext emptyList()
 
-        return runCatching {
+        runCatching {
             val encoded = URLEncoder.encode(term, StandardCharsets.UTF_8.toString())
             parseItems(getJson("/search/multi?query=$encoded", token).getJSONArray("results"), "movie")
         }.getOrDefault(emptyList())
     }
 
-    suspend fun credits(personId: Int): List<MediaItem> {
-        if (personId <= 0) return emptyList()
-        personCredits[personId]?.let { return it }
+    suspend fun credits(personId: Int): List<MediaItem> = withContext(Dispatchers.Default) {
+        if (personId <= 0) return@withContext emptyList()
+        personCredits[personId]?.let { return@withContext it }
         val token = BuildConfig.TMDB_TOKEN.trim()
-        if (token.isEmpty()) return emptyList()
+        if (token.isEmpty()) return@withContext emptyList()
 
         val result = runCatching {
             parseItems(getJson("/person/$personId/combined_credits", token).getJSONArray("cast"), "movie", 100)
@@ -163,7 +163,7 @@ object CatalogRepository {
                 .take(12)
         }.getOrDefault(emptyList())
         personCredits[personId] = result
-        return result
+        result
     }
 
     private suspend fun fetch(spec: CatalogSpec, token: String): CatalogSection {

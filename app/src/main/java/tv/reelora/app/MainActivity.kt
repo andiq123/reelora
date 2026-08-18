@@ -200,31 +200,16 @@ private fun Loading() {
 
 @Composable
 private fun AmbientBackdrop() {
-    val motion = rememberInfiniteTransition(label = "ambient background")
-    val drift by motion.animateFloat(
-        initialValue = -1f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(18_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "ambient drift",
-    )
     Box(Modifier.fillMaxSize()) {
         Box(
-            Modifier.size(560.dp).align(Alignment.TopEnd).graphicsLayer {
-                translationX = drift * 54.dp.toPx()
-                translationY = (drift + 1f) * 26.dp.toPx()
-                alpha = .24f
-            }.background(
-                Brush.radialGradient(listOf(Violet.copy(alpha = .7f), Color.Transparent)),
+            Modifier.size(560.dp).align(Alignment.TopEnd).background(
+                Brush.radialGradient(listOf(Violet.copy(alpha = .17f), Color.Transparent)),
                 CircleShape,
             ),
         )
         Box(
-            Modifier.size(460.dp).align(Alignment.BottomStart).graphicsLayer {
-                translationX = -drift * 44.dp.toPx()
-                translationY = -(drift + 1f) * 18.dp.toPx()
-                alpha = .15f
-            }.background(
-                Brush.radialGradient(listOf(Coral.copy(alpha = .65f), Color.Transparent)),
+            Modifier.size(460.dp).align(Alignment.BottomStart).background(
+                Brush.radialGradient(listOf(Coral.copy(alpha = .10f), Color.Transparent)),
                 CircleShape,
             ),
         )
@@ -233,28 +218,14 @@ private fun AmbientBackdrop() {
 
 @Composable
 private fun LoadingBlock(width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp) {
-    val motion = rememberInfiniteTransition(label = "loading block")
-    val alpha by motion.animateFloat(
-        initialValue = .07f,
-        targetValue = .15f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "loading block alpha",
-    )
     Box(
         Modifier.width(width).height(height).clip(RoundedCornerShape(radius))
-            .background(Brush.linearGradient(listOf(Color.White.copy(alpha = alpha), Violet.copy(alpha = alpha * .55f)))),
+            .background(Brush.linearGradient(listOf(Color.White.copy(alpha = .12f), Violet.copy(alpha = .06f)))),
     )
 }
 
 @Composable
 private fun LoadingPosterRow() {
-    val motion = rememberInfiniteTransition(label = "poster loading")
-    val alpha by motion.animateFloat(
-        initialValue = .07f,
-        targetValue = .15f,
-        animationSpec = infiniteRepeatable(tween(950), RepeatMode.Reverse),
-        label = "poster loading alpha",
-    )
     Row(
         Modifier.height(264.dp).padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -262,7 +233,7 @@ private fun LoadingPosterRow() {
         repeat(5) {
             Box(
                 Modifier.width(176.dp).height(248.dp).clip(RoundedCornerShape(14.dp))
-                    .background(Brush.linearGradient(listOf(Color.White.copy(alpha = alpha), Violet.copy(alpha = alpha * .55f)))),
+                    .background(Brush.linearGradient(listOf(Color.White.copy(alpha = .11f), Violet.copy(alpha = .055f)))),
             )
         }
     }
@@ -270,28 +241,23 @@ private fun LoadingPosterRow() {
 
 @Composable
 private fun LoadingCastRow() {
-    val motion = rememberInfiniteTransition(label = "cast loading")
-    val alpha by motion.animateFloat(
-        initialValue = .07f,
-        targetValue = .15f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "cast loading alpha",
-    )
     Row(Modifier.height(98.dp).padding(horizontal = 6.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         repeat(8) {
             Column(Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(58.dp).background(Color.White.copy(alpha = alpha), CircleShape))
+                Box(Modifier.size(58.dp).background(Color.White.copy(alpha = .11f), CircleShape))
                 Spacer(Modifier.height(7.dp))
-                Box(Modifier.width(68.dp).height(8.dp).background(Color.White.copy(alpha = alpha), CircleShape))
+                Box(Modifier.width(68.dp).height(8.dp).background(Color.White.copy(alpha = .11f), CircleShape))
             }
         }
     }
 }
 
 @Composable
-private fun artworkModel(url: String): ImageRequest {
+private fun artworkModel(url: String, fade: Boolean = false): ImageRequest {
     val context = LocalContext.current
-    return remember(url) { ImageRequest.Builder(context).data(url).crossfade(220).build() }
+    return remember(url, fade) {
+        ImageRequest.Builder(context).data(url).apply { if (fade) crossfade(180) }.build()
+    }
 }
 
 @Composable
@@ -627,7 +593,7 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit) {
         ) { featured ->
             featured.backdropUrl?.let {
                 AsyncImage(
-                    model = artworkModel(it),
+                    model = artworkModel(it, fade = true),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -702,16 +668,14 @@ private fun MediaRow(section: CatalogSection, onSelect: (MediaItem) -> Unit) {
 @Composable
 private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.025f else 1f, tween(110), label = "poster focus")
+    val scale = if (focused) 1.012f else 1f
     Box(
         modifier
             .width(176.dp)
             .height(248.dp)
-            .zIndex(if (focused) 1f else 0f)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (focused) 14.dp.toPx() else 0f
             }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(14.dp))
@@ -768,7 +732,6 @@ private fun ActionButton(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (focused) 16.dp.toPx() else 0f
             }
             .onFocusChanged {
                 focused = it.isFocused
@@ -812,47 +775,33 @@ private fun DetailsDialog(
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
     var artworkReady by remember(artwork) { mutableStateOf(false) }
     val artworkAlpha by animateFloatAsState(if (artworkReady) .52f else 0f, tween(500), label = "details artwork")
-    val artworkMotion = rememberInfiniteTransition(label = "details artwork motion")
-    val artworkDrift by artworkMotion.animateFloat(
-        initialValue = -1f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(24_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "details artwork drift",
-    )
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
       Box(Modifier.fillMaxSize().background(Background), contentAlignment = Alignment.Center) {
         AnimatedVisibility(
           visible = entered,
-          enter = fadeIn(tween(180)) + scaleIn(
-              initialScale = .965f,
-              animationSpec = spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
-          ),
+          enter = fadeIn(tween(140)),
           modifier = Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f),
           label = "details dialog",
         ) {
-         Box(
-           Modifier.fillMaxSize().clip(RoundedCornerShape(26.dp))
-             .background(Color(0xFF11111C))
-             .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp)),
-         ) {
-          AmbientBackdrop()
-          artwork?.let {
+         Box(Modifier.fillMaxSize()) {
+          Box(
+              Modifier.fillMaxSize().clip(RoundedCornerShape(26.dp)).background(Color(0xFF11111C)),
+          ) {
+           artwork?.let {
               AsyncImage(
-                  model = artworkModel(it),
+                  model = artworkModel(it, fade = true),
                   contentDescription = null,
                   contentScale = ContentScale.Crop,
                   onSuccess = { artworkReady = true },
                   modifier = Modifier.fillMaxSize().graphicsLayer {
                       alpha = artworkAlpha
-                      scaleX = 1.06f + artworkDrift * .01f
-                      scaleY = 1.06f + artworkDrift * .01f
-                      translationX = artworkDrift * 8.dp.toPx()
-                      translationY = artworkDrift * 3.dp.toPx()
+                      scaleX = 1.06f
+                      scaleY = 1.06f
                   },
               )
-          }
-          Box(
+           }
+           Box(
               Modifier.fillMaxSize().background(
                   Brush.verticalGradient(
                       0f to Background.copy(alpha = .24f),
@@ -860,7 +809,8 @@ private fun DetailsDialog(
                       1f to Background.copy(alpha = .80f),
                   )
               )
-          )
+           )
+          }
           LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -974,6 +924,9 @@ private fun DetailsDialog(
                 }
             } }
           }
+          Box(
+              Modifier.fillMaxSize().border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp)),
+          )
          }
         }
       }
@@ -1067,12 +1020,11 @@ private fun CastRow(
 @Composable
 private fun CastCard(person: CastMember, selected: Boolean, downRequester: FocusRequester?, onSelect: (CastMember) -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "cast focus")
+    val scale = if (focused) 1.02f else 1f
     Column(
         Modifier
             .width(96.dp)
             .focusProperties { downRequester?.let { down = it } }
-            .zIndex(if (focused) 1f else 0f)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(12.dp))
