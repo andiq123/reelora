@@ -13,6 +13,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ReeloraTV">
         <activity
+            android:name=".TrailerActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="landscape" />
+        <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"

@@ -40,6 +40,13 @@ class CatalogRepositoryTest {
     }
 
     @Test
+    fun discoveryAvoidsTheLastTenTitles() {
+        val items = (1..3).map { MediaItem(it, "Title $it", "", "2026", 8.0, 1, "movie", null, null) }
+        val next = nextDiscoveryItem(items, items.take(2).map(::mediaKey))
+        assertEquals(items.last(), next)
+    }
+
+    @Test
     fun releaseBadgeDistinguishesUpcomingAndReleasedTitles() {
         val today = LocalDate.of(2026, 8, 18)
         assertTrue(releaseLabel("2026-09-04", today).startsWith("◷ COMING"))

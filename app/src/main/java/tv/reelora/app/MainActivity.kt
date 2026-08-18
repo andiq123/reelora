@@ -1,11 +1,14 @@
 package tv.reelora.app
 
+import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.view.KeyEvent
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -74,6 +77,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -93,23 +99,34 @@ import androidx.tv.material3.darkColorScheme
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val Background = Color(0xFF07070F)
 private val Surface = Color(0xFF151522)
 private val Violet = Color(0xFFA978FF)
 private val Coral = Color(0xFFFF8064)
 
+private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
+
 class MainActivity : ComponentActivity() {
+    private val inputEvents = Channel<Unit>(Channel.CONFLATED)
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        inputEvents.trySend(Unit)
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ReeloraApp() }
+        setContent { ReeloraApp(inputEvents) }
     }
 }
 
 @Composable
-private fun ReeloraApp() {
+private fun ReeloraApp(inputEvents: Channel<Unit>) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Violet,
@@ -123,15 +140,54 @@ private fun ReeloraApp() {
         var result by remember { mutableStateOf<CatalogResult?>(null) }
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
+        var currentPage by remember { mutableStateOf(0) }
+        var theater by remember { mutableStateOf<TheaterFeature?>(null) }
+        var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
+        var recentTheater by remember { mutableStateOf(emptyList<String>()) }
+        var theaterOpen by remember { mutableStateOf(false) }
+        val context = LocalContext.current
+        val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            theaterOpen = false
+            theater = null
+            selected = theaterReturn
+            theaterReturn = null
+        }
         LaunchedEffect(Unit) { result = CatalogRepository.load() }
 
-        Box(Modifier.fillMaxSize().background(Background)) {
+        LaunchedEffect(theater?.trailer?.key) {
+            val feature = theater ?: return@LaunchedEffect
+            val intent = Intent(context, TrailerActivity::class.java)
+                .putExtra("videoId", feature.trailer.key)
+            if (theaterOpen) context.startActivity(intent) else {
+                theaterOpen = true
+                theaterLauncher.launch(intent)
+            }
+        }
+
+        Box(
+            Modifier.fillMaxSize().background(Background).onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val wasPlaying = theater != null
+                theater = null
+                if (wasPlaying) {
+                    selected = theaterReturn
+                    theaterReturn = null
+                }
+                wasPlaying
+            },
+        ) {
             AmbientBackdrop()
             val catalog = result
             if (catalog == null) {
                 Loading()
             } else {
-                Home(catalog, onSearch = { searching = true }, onSelect = { selected = it })
+                Home(
+                    catalog,
+                    selectedCategory = currentPage,
+                    onCategory = { currentPage = it },
+                    onSearch = { searching = true },
+                    onSelect = { selected = it },
+                )
                 if (searching) {
                     SearchDialog(
                         suggestions = catalog.sections.first().items.take(10),
@@ -148,10 +204,120 @@ private fun ReeloraApp() {
                         similar = catalog.sections.flatMap { it.items }.distinctBy { it.id }.filter { it.id != item.id }.take(5),
                         onDismiss = { selected = null },
                         onSelect = { selected = it },
+                        onPlayTrailer = { trailer ->
+                            theaterReturn = item
+                            theater = TheaterFeature(item, trailer)
+                            recentTheater = (recentTheater + mediaKey(item)).takeLast(10)
+                            selected = null
+                        },
                     )
                 }
             }
         }
+
+        LaunchedEffect(currentPage, result, theater) {
+            val catalog = result ?: return@LaunchedEffect
+            if (theater != null) return@LaunchedEffect
+            while (withTimeoutOrNull(60_000) { inputEvents.receive() } != null) Unit
+            findTheaterFeature(
+                catalog.sections.filter { it.page == currentPage }.flatMap { it.items },
+                recentTheater,
+            )?.let {
+                theater = it
+                theaterReturn = null
+                selected = null
+                searching = false
+                recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
+            }
+        }
+        LaunchedEffect(theater?.item?.let(::mediaKey)) {
+            val current = theater ?: return@LaunchedEffect
+            delay(45_000)
+            val catalog = result ?: return@LaunchedEffect
+            findTheaterFeature(
+                catalog.sections.filter { it.page == currentPage }.flatMap { it.items },
+                recentTheater,
+            )?.let {
+                if (theater == current) {
+                    theater = it
+                    recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
+                }
+            }
+        }
+    }
+}
+
+internal fun mediaKey(item: MediaItem) = "${item.mediaType}-${item.id}"
+
+internal fun nextDiscoveryItem(items: List<MediaItem>, recent: List<String>): MediaItem? {
+    val unseen = items.filterNot { mediaKey(it) in recent }
+    return (unseen.ifEmpty { items.filterNot { mediaKey(it) == recent.lastOrNull() } }).randomOrNull()
+        ?: items.firstOrNull()
+}
+
+private suspend fun findTheaterFeature(items: List<MediaItem>, recent: List<String>): TheaterFeature? {
+    val candidates = items.distinctBy(::mediaKey)
+    var attempted = recent
+    repeat(minOf(8, candidates.size)) {
+        val item = nextDiscoveryItem(candidates, attempted) ?: return null
+        attempted = (attempted + mediaKey(item)).takeLast(candidates.size)
+        CatalogRepository.details(item).trailer?.let { return TheaterFeature(item, it) }
+    }
+    return null
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+class TrailerActivity : Activity() {
+    private lateinit var player: WebView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        player = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            webChromeClient = WebChromeClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    view.evaluateJavascript(
+                        "MediaSource.isTypeSupported=(f=>t=>/av01|av1/i.test(t)?false:f(t))(MediaSource.isTypeSupported.bind(MediaSource))",
+                        null,
+                    )
+                }
+            }
+            setBackgroundColor(android.graphics.Color.BLACK)
+        }
+        setContentView(player)
+        play(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        play(intent)
+    }
+
+    private fun play(intent: Intent) {
+        val videoId = intent.getStringExtra("videoId").orEmpty()
+            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        player.loadUrl(
+            "https://www.youtube.com/embed/$videoId?autoplay=1&controls=1&rel=0&playsinline=1&origin=https%3A%2F%2Freelora.app",
+            mapOf("Referer" to "https://reelora.app/"),
+        )
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            setResult(RESULT_OK)
+            finish()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onDestroy() {
+        player.stopLoading()
+        player.destroy()
+        super.onDestroy()
     }
 }
 
@@ -261,8 +427,13 @@ private fun artworkModel(url: String, fade: Boolean = false): ImageRequest {
 }
 
 @Composable
-private fun Home(catalog: CatalogResult, onSearch: () -> Unit, onSelect: (MediaItem) -> Unit) {
-    var selectedCategory by remember { mutableStateOf(0) }
+private fun Home(
+    catalog: CatalogResult,
+    selectedCategory: Int,
+    onCategory: (Int) -> Unit,
+    onSearch: () -> Unit,
+    onSelect: (MediaItem) -> Unit,
+) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val restoreTop: () -> Unit = {
@@ -279,7 +450,7 @@ private fun Home(catalog: CatalogResult, onSearch: () -> Unit, onSelect: (MediaI
             categories = CatalogRepository.pageTitles,
             selectedCategory = selectedCategory,
             isDemo = catalog.isDemo,
-            onCategory = { selectedCategory = it },
+            onCategory = onCategory,
             onFocus = restoreTop,
             onSearch = onSearch,
         )
@@ -291,10 +462,13 @@ private fun Home(catalog: CatalogResult, onSearch: () -> Unit, onSelect: (MediaI
 private fun CategoryPage(sections: List<CatalogSection>, page: Int, listState: LazyListState, onSelect: (MediaItem) -> Unit) {
     val featured = sections.first()
     var hero by remember(featured) { mutableStateOf(featured.items.first()) }
+    var recent by remember(page) { mutableStateOf(listOf(mediaKey(hero))) }
     LaunchedEffect(featured, hero) {
         delay(10_000)
-        val next = (featured.items.indexOfFirst { it.id == hero.id } + 1).mod(featured.items.size)
-        hero = featured.items[next]
+        nextDiscoveryItem(featured.items, recent)?.let {
+            hero = it
+            recent = (recent + mediaKey(it)).takeLast(10)
+        }
     }
     val tint = listOf(Violet, Coral, Color(0xFF5B8CFF), Color(0xFF24B8A6), Color(0xFFFFB24A))[page]
 
@@ -764,12 +938,12 @@ private fun DetailsDialog(
     similar: List<MediaItem>,
     onDismiss: () -> Unit,
     onSelect: (MediaItem) -> Unit,
+    onPlayTrailer: (Trailer) -> Unit,
 ) {
     var entered by remember(item.id) { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val actorRowRequester = remember { FocusRequester() }
     val similarRowRequester = remember { FocusRequester() }
     var details by remember(item.id) { mutableStateOf<MediaDetails?>(null) }
@@ -832,7 +1006,7 @@ private fun DetailsDialog(
                         onClick = onDismiss,
                     )
                     details?.trailer?.let { trailer ->
-                        ActionButton("Play trailer", onFocused = restoreTop, glyph = "▶") { openTrailer(context, trailer) }
+                        ActionButton("Play trailer", onFocused = restoreTop, glyph = "▶") { onPlayTrailer(trailer) }
                     }
                     if (details == null) LoadingBlock(132.dp, 42.dp, 10.dp)
                 }
@@ -986,15 +1160,6 @@ private fun AvailabilityBadge(availability: WatchAvailability) {
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
-    }
-}
-
-private fun openTrailer(context: Context, trailer: Trailer) {
-    val url = Uri.parse("https://www.youtube.com/watch?v=${trailer.key}")
-    runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, url).setPackage("com.amazon.firetv.youtube"))
-    }.getOrElse {
-        context.startActivity(Intent(Intent.ACTION_VIEW, url))
     }
 }
 
