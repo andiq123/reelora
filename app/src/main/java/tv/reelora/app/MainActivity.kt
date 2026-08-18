@@ -230,7 +230,6 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 wasPlaying
             },
         ) {
-            AmbientBackdrop()
             val catalog = result
             if (catalog == null) {
                 Loading()
@@ -717,10 +716,11 @@ private fun AppDock(apps: List<LauncherApp>, headerFocus: FocusRequester, onLaun
 @Composable
 private fun AppCard(app: LauncherApp, onLaunch: (LauncherApp) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.045f else 1f, tween(120), label = "app focus")
     Column(
         modifier.width(126.dp).zIndex(if (focused) 1f else 0f).graphicsLayer {
-            scaleX = if (focused) 1.08f else 1f
-            scaleY = if (focused) 1.08f else 1f
+            scaleX = scale
+            scaleY = scale
         }.onFocusChanged { focused = it.isFocused }.clickable(role = Role.Button) { onLaunch(app) },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -950,23 +950,13 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit) {
             .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(24.dp))
             .clickable(role = Role.Button) { onSelect(item) }
     ) {
-        AnimatedContent(
-            targetState = item,
-            transitionSpec = {
-                (slideInHorizontally(tween(360)) { it / 4 } + fadeIn(tween(240))) togetherWith
-                    (slideOutHorizontally(tween(360)) { -it / 4 } + fadeOut(tween(240)))
-            },
-            contentKey = { it.id },
-            label = "featured artwork",
-        ) { featured ->
-            featured.backdropUrl?.let {
-                AsyncImage(
-                    model = artworkModel(it, fade = true),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+        item.backdropUrl?.let {
+            AsyncImage(
+                model = artworkModel(it, fade = true),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         Box(
             Modifier.fillMaxSize().background(
@@ -1036,15 +1026,11 @@ private fun MediaRow(section: CatalogSection, onSelect: (MediaItem) -> Unit) {
 @Composable
 private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
-    val scale = if (focused) 1.012f else 1f
+    // Keep poster focus draw-only: per-card transform layers jank on 32-bit TV GPUs.
     Box(
         modifier
             .width(176.dp)
             .height(248.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(14.dp))
             .background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))
@@ -1059,7 +1045,10 @@ private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier:
         cardReleaseLabel(item.releaseDate)?.let {
             InfoBadge(it, Coral, Modifier.align(Alignment.TopStart).padding(9.dp))
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Background.copy(alpha = .95f)))))
+        Box(
+            Modifier.fillMaxWidth().height(82.dp).align(Alignment.BottomCenter)
+                .background(Background.copy(alpha = .86f)),
+        )
         Column(Modifier.align(Alignment.BottomStart).padding(13.dp)) {
             Text(item.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("${item.year}  ·  ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .65f), fontSize = 12.sp)
@@ -1141,8 +1130,6 @@ private fun DetailsDialog(
     var actorLoading by remember(item.id) { mutableStateOf(false) }
     val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: item.backdropUrl
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
-    var artworkReady by remember(artwork) { mutableStateOf(false) }
-    val artworkAlpha by animateFloatAsState(if (artworkReady) .52f else 0f, tween(500), label = "details artwork")
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
       Box(Modifier.fillMaxSize().background(Background), contentAlignment = Alignment.Center) {
@@ -1161,22 +1148,13 @@ private fun DetailsDialog(
                   model = artworkModel(it, fade = true),
                   contentDescription = null,
                   contentScale = ContentScale.Crop,
-                  onSuccess = { artworkReady = true },
-                  modifier = Modifier.fillMaxSize().graphicsLayer {
-                      alpha = artworkAlpha
-                      scaleX = 1.06f
-                      scaleY = 1.06f
-                  },
+                  modifier = Modifier.fillMaxSize(),
               )
            }
+           Box(Modifier.fillMaxSize().background(Background.copy(alpha = .62f)))
            Box(
-              Modifier.fillMaxSize().background(
-                  Brush.verticalGradient(
-                      0f to Background.copy(alpha = .24f),
-                      .55f to Background.copy(alpha = .48f),
-                      1f to Background.copy(alpha = .80f),
-                  )
-              )
+              Modifier.fillMaxWidth().height(280.dp).align(Alignment.BottomCenter)
+                  .background(Background.copy(alpha = .24f)),
            )
           }
           LazyColumn(
@@ -1379,12 +1357,10 @@ private fun CastRow(
 @Composable
 private fun CastCard(person: CastMember, selected: Boolean, downRequester: FocusRequester?, onSelect: (CastMember) -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale = if (focused) 1.02f else 1f
     Column(
         Modifier
             .width(96.dp)
             .focusProperties { downRequester?.let { down = it } }
-            .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(12.dp))
             .clickable(role = Role.Button) { onSelect(person) }

@@ -1,5 +1,6 @@
 package tv.reelora.app
 
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,6 +16,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+@Immutable
 data class MediaItem(
     val id: Int,
     val title: String,
@@ -28,14 +30,16 @@ data class MediaItem(
     val releaseDate: String = "",
 )
 
-data class CastMember(val id: Int, val name: String, val character: String, val profileUrl: String?)
-data class Trailer(val key: String, val name: String, val official: Boolean)
-data class WatchProvider(val name: String, val logoUrl: String?)
+@Immutable data class CastMember(val id: Int, val name: String, val character: String, val profileUrl: String?)
+@Immutable data class Trailer(val key: String, val name: String, val official: Boolean)
+@Immutable data class WatchProvider(val name: String, val logoUrl: String?)
+@Immutable
 data class WatchAvailability(
     val region: String,
     val streaming: List<WatchProvider>,
     val rentOrBuy: List<WatchProvider>,
 )
+@Immutable
 data class MediaDetails(
     val runtime: String,
     val genres: String,
@@ -45,9 +49,9 @@ data class MediaDetails(
     val availability: WatchAvailability?,
     val backdrops: List<String>,
 )
-data class CatalogSection(val page: Int, val title: String, val items: List<MediaItem>)
-data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
-data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
+@Immutable data class CatalogSection(val page: Int, val title: String, val items: List<MediaItem>)
+@Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
+@Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 
 object CatalogRepository {
     private val personCredits = mutableMapOf<Int, List<MediaItem>>()
