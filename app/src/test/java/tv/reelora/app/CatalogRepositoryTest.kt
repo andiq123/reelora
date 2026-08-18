@@ -47,6 +47,16 @@ class CatalogRepositoryTest {
     }
 
     @Test
+    fun theaterIdleDelayCyclesThroughEveryChoice() {
+        val cycled = generateSequence(THEATER_IDLE_OPTIONS.first(), ::nextTheaterIdleMinutes)
+            .drop(1)
+            .take(THEATER_IDLE_OPTIONS.size)
+            .toList()
+        assertEquals(THEATER_IDLE_OPTIONS.drop(1) + THEATER_IDLE_OPTIONS.first(), cycled)
+        assertEquals(THEATER_IDLE_OPTIONS.first(), nextTheaterIdleMinutes(999))
+    }
+
+    @Test
     fun releaseBadgeDistinguishesUpcomingAndReleasedTitles() {
         val today = LocalDate.of(2026, 8, 18)
         assertTrue(releaseLabel("2026-09-04", today).startsWith("◷ COMING"))

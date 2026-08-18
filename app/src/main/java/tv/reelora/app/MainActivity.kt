@@ -176,7 +176,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         val context = LocalContext.current
         val preferences = remember { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
         var theaterEnabled by remember { mutableStateOf(preferences.getBoolean("theaterEnabled", true)) }
-        var idleMinutes by remember { mutableStateOf(preferences.getInt("idleMinutes", 1)) }
+        var idleMinutes by remember {
+            mutableStateOf(preferences.getInt("idleMinutes", 3).takeIf { it in THEATER_IDLE_OPTIONS } ?: 3)
+        }
         var compactApps by remember { mutableStateOf(preferences.getBoolean("compactApps", false)) }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
@@ -317,6 +319,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
 }
 
 internal fun mediaKey(item: MediaItem) = "${item.mediaType}-${item.id}"
+internal val THEATER_IDLE_OPTIONS = listOf(1, 3, 5, 10, 15, 30)
+internal fun nextTheaterIdleMinutes(current: Int) =
+    THEATER_IDLE_OPTIONS[(THEATER_IDLE_OPTIONS.indexOf(current) + 1).coerceAtLeast(0) % THEATER_IDLE_OPTIONS.size]
 
 private fun launcherMovieSections(catalog: CatalogResult): List<CatalogSection> {
     val preferred = listOf("Now in cinemas", "Popular new releases", "Coming soon", "Trending this week")
@@ -816,11 +821,17 @@ private fun SettingsDialog(
                     ) {
                         onTheaterEnabled(!theaterEnabled)
                     }
-                    ActionButton("Starts after $idleMinutes min", glyph = "◷") {
-                        onIdleMinutes(when (idleMinutes) { 1 -> 3; 3 -> 5; else -> 1 })
+                    ActionButton("Idle delay · $idleMinutes min", glyph = "◷") {
+                        onIdleMinutes(nextTheaterIdleMinutes(idleMinutes))
                     }
                 }
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Starts after no remote input · pauses while another app is open",
+                    color = Color.White.copy(alpha = .46f),
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(20.dp))
                 Text("SYSTEM", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
