@@ -188,12 +188,6 @@ private fun Home(catalog: CatalogResult, onSearch: () -> Unit, onSelect: (MediaI
 @Composable
 private fun CategoryPage(section: CatalogSection, listState: LazyListState, onSelect: (MediaItem) -> Unit) {
     var hero by remember(section) { mutableStateOf(section.items.first()) }
-    var focusedItem by remember(section) { mutableStateOf(hero) }
-
-    LaunchedEffect(focusedItem) {
-        delay(140)
-        hero = focusedItem
-    }
     LaunchedEffect(section, hero) {
         delay(10_000)
         val next = (section.items.indexOfFirst { it.id == hero.id } + 1).mod(section.items.size)
@@ -206,7 +200,7 @@ private fun CategoryPage(section: CatalogSection, listState: LazyListState, onSe
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         item { Hero(hero, onSelect) }
-        item { MediaRow(section, onFocused = { focusedItem = it }, onSelect = onSelect) }
+        item { MediaRow(section, onSelect) }
         item {
             Text(
                 "Data and images by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
@@ -432,7 +426,7 @@ private fun SearchDialog(
                 modifier = Modifier.focusGroup(),
             ) {
                 items(shown, key = { "${it.mediaType}-${it.id}" }) { item ->
-                    PosterCard(item, onFocused = {}, onSelect = {
+                    PosterCard(item, onSelect = {
                         keyboard?.hide()
                         onSelect(item)
                     })
@@ -523,7 +517,7 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit) {
 }
 
 @Composable
-private fun MediaRow(section: CatalogSection, onFocused: (MediaItem) -> Unit, onSelect: (MediaItem) -> Unit) {
+private fun MediaRow(section: CatalogSection, onSelect: (MediaItem) -> Unit) {
     Column {
         Text(section.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
         Spacer(Modifier.height(12.dp))
@@ -533,16 +527,16 @@ private fun MediaRow(section: CatalogSection, onFocused: (MediaItem) -> Unit, on
             modifier = Modifier.focusGroup(),
         ) {
             items(section.items, key = { "${section.title}-${it.id}" }) { item ->
-                PosterCard(item, onFocused, onSelect)
+                PosterCard(item, onSelect)
             }
         }
     }
 }
 
 @Composable
-private fun PosterCard(item: MediaItem, onFocused: (MediaItem) -> Unit, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
+private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.045f else 1f, spring(stiffness = Spring.StiffnessMediumLow), label = "poster focus")
+    val scale by animateFloatAsState(if (focused) 1.025f else 1f, tween(110), label = "poster focus")
     Box(
         modifier
             .width(176.dp)
@@ -553,10 +547,7 @@ private fun PosterCard(item: MediaItem, onFocused: (MediaItem) -> Unit, onSelect
                 scaleY = scale
                 shadowElevation = if (focused) 14.dp.toPx() else 0f
             }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused(item)
-            }
+            .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(14.dp))
             .background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))
             .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(14.dp))
@@ -638,15 +629,16 @@ private fun DetailsDialog(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val actorRowRequester = remember { FocusRequester() }
+    val similarRowRequester = remember { FocusRequester() }
     var details by remember(item.id) { mutableStateOf<MediaDetails?>(null) }
     var selectedActor by remember(item.id) { mutableStateOf<CastMember?>(null) }
     var actorTitles by remember(item.id) { mutableStateOf<List<MediaItem>?>(null) }
     var actorLoading by remember(item.id) { mutableStateOf(false) }
     val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: details?.let { item.backdropUrl }
+    val moreLike = details?.similar?.ifEmpty { similar } ?: similar
     var artworkReady by remember(artwork) { mutableStateOf(false) }
     val artworkAlpha by animateFloatAsState(if (artworkReady) .42f else 0f, tween(500), label = "details artwork")
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
-    val revealRow: (Int) -> Unit = { index -> scope.launch { delay(120); listState.animateScrollToItem(index) } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
       Box(Modifier.fillMaxSize().background(Background), contentAlignment = Alignment.Center) {
         artwork?.let {
@@ -679,7 +671,7 @@ private fun DetailsDialog(
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xFF12121E).copy(alpha = .82f))
                 .border(1.dp, Color.White.copy(alpha = .12f), RoundedCornerShape(24.dp)),
-            contentPadding = PaddingValues(start = 28.dp, top = 28.dp, end = 28.dp, bottom = 190.dp),
+            contentPadding = PaddingValues(start = 28.dp, top = 28.dp, end = 28.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item { Column {
@@ -732,9 +724,12 @@ private fun DetailsDialog(
                 CastRow(
                     details?.cast,
                     selectedActor,
-                    actorRowRequester.takeIf { actorTitles?.isNotEmpty() == true },
-                    onFocus = { revealRow(1) },
-                    onSelect = { selectedActor = it },
+                    when {
+                        selectedActor != null && actorTitles?.isNotEmpty() == true -> actorRowRequester
+                        moreLike.isNotEmpty() -> similarRowRequester
+                        else -> null
+                    },
+                    onSelect = { selectedActor = if (selectedActor?.id == it.id) null else it },
                 )
             } }
             selectedActor?.let { actor ->
@@ -753,7 +748,6 @@ private fun DetailsDialog(
                             itemsIndexed(titles, key = { _, title -> "actor-${actor.id}-${title.mediaType}-${title.id}" }) { index, title ->
                                 PosterCard(
                                     title,
-                                    onFocused = { revealRow(2) },
                                     onSelect = onSelect,
                                     modifier = if (index == 0) Modifier.focusRequester(actorRowRequester) else Modifier,
                                 )
@@ -770,8 +764,12 @@ private fun DetailsDialog(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.focusGroup(),
                 ) {
-                    items(details?.similar?.ifEmpty { similar } ?: similar, key = { it.id }) { suggestion ->
-                        PosterCard(suggestion, onFocused = { revealRow(if (selectedActor == null) 2 else 3) }, onSelect = onSelect)
+                    itemsIndexed(moreLike, key = { _, suggestion -> suggestion.id }) { index, suggestion ->
+                        PosterCard(
+                            suggestion,
+                            onSelect,
+                            modifier = if (index == 0) Modifier.focusRequester(similarRowRequester) else Modifier,
+                        )
                     }
                 }
             } }
@@ -843,7 +841,6 @@ private fun CastRow(
     cast: List<CastMember>?,
     selected: CastMember?,
     downRequester: FocusRequester?,
-    onFocus: () -> Unit,
     onSelect: (CastMember) -> Unit,
 ) {
     if (cast == null) {
@@ -859,24 +856,21 @@ private fun CastRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.focusGroup(),
     ) {
-        items(cast, key = { "${it.id}-${it.name}" }) { person -> CastCard(person, person.id == selected?.id, downRequester, onFocus, onSelect) }
+        items(cast, key = { "${it.id}-${it.name}" }) { person -> CastCard(person, person.id == selected?.id, downRequester, onSelect) }
     }
 }
 
 @Composable
-private fun CastCard(person: CastMember, selected: Boolean, downRequester: FocusRequester?, onFocus: () -> Unit, onSelect: (CastMember) -> Unit) {
+private fun CastCard(person: CastMember, selected: Boolean, downRequester: FocusRequester?, onSelect: (CastMember) -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.07f else 1f, spring(stiffness = Spring.StiffnessMediumLow), label = "cast focus")
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "cast focus")
     Column(
         Modifier
             .width(96.dp)
             .focusProperties { downRequester?.let { down = it } }
             .zIndex(if (focused) 1f else 0f)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocus()
-            }
+            .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(12.dp))
             .clickable(role = Role.Button) { onSelect(person) }
             .padding(vertical = 5.dp),
