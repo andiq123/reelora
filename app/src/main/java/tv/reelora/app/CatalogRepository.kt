@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 @Immutable
 data class MediaItem(
@@ -54,7 +55,8 @@ data class MediaDetails(
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 
 object CatalogRepository {
-    private val personCredits = mutableMapOf<Int, List<MediaItem>>()
+    private val personCredits = ConcurrentHashMap<Int, List<MediaItem>>()
+    private val mediaDetails = ConcurrentHashMap<String, MediaDetails>()
     private val today = LocalDate.now().format(DateTimeFormatter.ISO_DATE)
     private val recentDate = LocalDate.now().minusMonths(8).format(DateTimeFormatter.ISO_DATE)
 
@@ -103,7 +105,10 @@ object CatalogRepository {
         }.getOrElse { fallback() }
     }
 
-    suspend fun details(item: MediaItem): MediaDetails = withContext(Dispatchers.Default) {
+    suspend fun details(item: MediaItem): MediaDetails {
+        val key = "${item.mediaType}-${item.id}"
+        mediaDetails[key]?.let { return it }
+        return withContext(Dispatchers.Default) {
         val token = BuildConfig.TMDB_TOKEN.trim()
         if (token.isEmpty()) return@withContext fallbackDetails(item)
 
@@ -168,6 +173,7 @@ object CatalogRepository {
                 }.orEmpty(),
             )
         }.getOrElse { fallbackDetails(item) }
+        }.also { mediaDetails[key] = it }
     }
 
     suspend fun search(query: String): List<MediaItem> = withContext(Dispatchers.Default) {

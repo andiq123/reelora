@@ -22,22 +22,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -127,15 +116,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme
 import coil3.compose.AsyncImage
+import coil3.imageLoader
 import coil3.request.ImageRequest
-import coil3.request.crossfade
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -775,11 +764,9 @@ private fun LoadingCastRow() {
 }
 
 @Composable
-private fun artworkModel(url: String, fade: Boolean = false): ImageRequest {
+private fun artworkModel(url: String): ImageRequest {
     val context = LocalContext.current
-    return remember(url, fade) {
-        ImageRequest.Builder(context).data(url).apply { if (fade) crossfade(180) }.build()
-    }
+    return remember(url) { ImageRequest.Builder(context).data(url).build() }
 }
 
 @Composable
@@ -801,6 +788,7 @@ private fun Home(
 ) {
     val listState = rememberLazyListState()
     val appListState = rememberLazyListState()
+    val context = LocalContext.current
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
     val lastAppRowFocus = remember { arrayOf<FocusRequester?>(null) }
@@ -826,9 +814,14 @@ private fun Home(
         delay(160)
         if (apps.isEmpty()) heroFocus.requestFocus() else appFocus.requestFocus()
     }
-    LaunchedEffect(hero) {
+    LaunchedEffect(hero, featured) {
+        launch { CatalogRepository.details(hero) }
+        val next = nextDiscoveryItem(featured.items, recent)
+        next?.backdropUrl?.let { url ->
+            context.imageLoader.enqueue(ImageRequest.Builder(context).data(url).size(1920, 720).build())
+        }
         delay(10_000)
-        nextDiscoveryItem(featured.items, recent)?.let {
+        next?.let {
             hero = it
             recent = (recent + mediaKey(it)).takeLast(10)
         }
@@ -1145,6 +1138,7 @@ private fun TvDialog(
     var visible by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(120), label = "dialog visibility")
     val close = {
         if (!closing) {
             closing = true
@@ -1158,20 +1152,13 @@ private fun TvDialog(
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
             if (ambient) AmbientBackdrop()
-            AnimatedVisibility(
-                visible = visible,
-                enter = fadeIn(tween(150)) + scaleIn(
-                    initialScale = .975f,
-                    animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
-                ),
-                exit = fadeOut(tween(110)) + scaleOut(targetScale = .985f, animationSpec = tween(110)),
-                label = "dialog surface",
-            ) {
-                Box(
-                    modifier.clip(DialogShape).background(PanelBrush)
-                        .border(1.dp, Color.White.copy(alpha = .12f), DialogShape),
-                ) { content(close) }
-            }
+            Box(
+                modifier.graphicsLayer {
+                    this.alpha = alpha
+                    translationY = (1f - alpha) * 10f
+                }.clip(DialogShape).background(PanelBrush)
+                    .border(1.dp, Color.White.copy(alpha = .12f), DialogShape),
+            ) { content(close) }
         }
     }
     LaunchedEffect(Unit) { visible = true }
@@ -1542,6 +1529,9 @@ private fun SearchDialog(
 @Composable
 private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
+    var detailsVisible by remember(item.id) { mutableStateOf(false) }
+    val detailsAlpha by animateFloatAsState(if (detailsVisible) 1f else 0f, tween(180), label = "featured details")
+    LaunchedEffect(item.id) { detailsVisible = true }
     Box(
         modifier
             .fillMaxWidth()
@@ -1552,7 +1542,7 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modif
     ) {
         item.backdropUrl?.let {
             AsyncImage(
-                model = artworkModel(it, fade = true),
+                model = artworkModel(it),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -1581,25 +1571,21 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modif
         Column(
             Modifier.fillMaxHeight().width(620.dp).padding(start = 58.dp, top = 42.dp, end = 24.dp, bottom = 28.dp),
         ) {
-            AnimatedContent(
-                targetState = item,
-                transitionSpec = {
-                    (slideInHorizontally(tween(320)) { it / 5 } + fadeIn(tween(220))) togetherWith
-                        (slideOutHorizontally(tween(320)) { -it / 5 } + fadeOut(tween(220)))
+            Box(
+                Modifier.weight(1f).graphicsLayer {
+                    alpha = detailsAlpha
+                    translationX = (1f - detailsAlpha) * 12f
                 },
-                contentKey = { it.id },
                 contentAlignment = Alignment.CenterStart,
-                modifier = Modifier.weight(1f),
-                label = "featured details",
-            ) { featured ->
+            ) {
                 Column {
-                    if (releaseLabel(featured.releaseDate).startsWith("◷")) InfoBadge(releaseLabel(featured.releaseDate), Coral)
+                    if (releaseLabel(item.releaseDate).startsWith("◷")) InfoBadge(releaseLabel(item.releaseDate), Coral)
                     Spacer(Modifier.height(6.dp))
-                    Text(featured.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(8.dp))
-                    Text("${featured.year}   ·   ★ ${"%.1f".format(featured.score)}", color = Color.White.copy(alpha = .82f), fontSize = 13.sp)
+                    Text("${item.year}   ·   ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .82f), fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text(featured.overview, color = Color.White.copy(alpha = .68f), fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.overview, color = Color.White.copy(alpha = .68f), fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -1756,7 +1742,7 @@ private fun DetailsDialog(
     var selectedActor by remember(item.id) { mutableStateOf<CastMember?>(null) }
     var actorTitles by remember(item.id) { mutableStateOf<List<MediaItem>?>(null) }
     var actorLoading by remember(item.id) { mutableStateOf(false) }
-    val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: item.backdropUrl
+    val artwork = item.backdropUrl ?: details?.backdrops?.firstOrNull()
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
     TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f), ambient = false) { close ->
@@ -1766,7 +1752,7 @@ private fun DetailsDialog(
           ) {
            artwork?.let {
               AsyncImage(
-                  model = artworkModel(it, fade = true),
+                  model = artworkModel(it),
                   contentDescription = null,
                   contentScale = ContentScale.Crop,
                   modifier = Modifier.fillMaxSize(),
