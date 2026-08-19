@@ -43,6 +43,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -89,6 +90,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -178,6 +180,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var searching by remember { mutableStateOf(false) }
         var settingsOpen by remember { mutableStateOf(false) }
         var appManagerOpen by remember { mutableStateOf(false) }
+        var configuredApp by remember { mutableStateOf<LauncherApp?>(null) }
         var theater by remember { mutableStateOf<TheaterFeature?>(null) }
         var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
@@ -196,7 +199,12 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var hiddenApps by remember {
             mutableStateOf(preferences.getStringSet("hiddenApps", emptySet()).orEmpty().toSet())
         }
-        val orderedApps = remember(apps, appOrder) { orderLauncherApps(apps, appOrder) }
+        var customAppNames by remember {
+            mutableStateOf(savedCustomAppNames(preferences.all))
+        }
+        val orderedApps = remember(apps, appOrder, customAppNames) {
+            orderLauncherApps(apps, appOrder).map { app -> customAppNames[launcherAppKey(app)]?.let { app.copy(name = it) } ?: app }
+        }
         val visibleApps = remember(orderedApps, hiddenApps) {
             orderedApps.filterNot { launcherAppKey(it) in hiddenApps }
         }
@@ -272,6 +280,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     },
                     onSearch = { searching = true },
                     onSettings = { settingsOpen = true },
+                    onManageApps = { appManagerOpen = true },
+                    onConfigureApp = { configuredApp = it },
                     onSelect = { selected = it },
                 )
                 if (searching) {
@@ -349,6 +359,24 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     },
                     onDismiss = { appManagerOpen = false },
                 )
+                configuredApp?.let { app ->
+                    AppConfigDialog(
+                        app = app,
+                        onSave = { name ->
+                            val key = launcherAppKey(app)
+                            customAppNames = customAppNames + (key to name)
+                            preferences.edit().putString("customName:$key", name).apply()
+                            configuredApp = null
+                        },
+                        onReset = {
+                            val key = launcherAppKey(app)
+                            customAppNames = customAppNames - key
+                            preferences.edit().remove("customName:$key").apply()
+                            configuredApp = null
+                        },
+                        onDismiss = { configuredApp = null },
+                    )
+                }
             }
         }
 
@@ -424,6 +452,10 @@ private fun orderLauncherApps(apps: List<LauncherApp>, savedOrder: List<String>)
 
 internal fun orderedAppKeys(installed: List<String>, saved: List<String>) =
     saved.filter { it in installed }.distinct() + installed.filterNot { it in saved }
+
+internal fun savedCustomAppNames(values: Map<String, *>) = values.mapNotNull { (key, value) ->
+    if (key.startsWith("customName:") && value is String) key.removePrefix("customName:") to value else null
+}.toMap()
 
 internal fun moveAppKey(order: List<String>, key: String, offset: Int): List<String> {
     val from = order.indexOf(key)
@@ -673,11 +705,15 @@ private fun Home(
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    onManageApps: () -> Unit,
+    onConfigureApp: (LauncherApp) -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val appListState = rememberLazyListState()
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
+    val firstMovieFocus = remember { FocusRequester() }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
@@ -694,6 +730,7 @@ private fun Home(
     var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
     LaunchedEffect(apps) {
         listState.scrollToItem(0)
+        appListState.scrollToItem(0)
         delay(160)
         if (apps.isEmpty()) heroFocus.requestFocus() else appFocus.requestFocus()
     }
@@ -733,10 +770,14 @@ private fun Home(
                             .focusRequester(heroFocus),
                     )
                     Spacer(Modifier.height(4.dp))
-                    AppDock(apps, heroFocus, appFocus, compactApps, onLaunch)
+                    AppDock(apps, appListState, heroFocus, appFocus, firstMovieFocus, compactApps, onLaunch, onConfigureApp, onManageApps, onSettings)
                 }
             }
-            sections.forEach { section -> item(key = section.title) { MediaRow(section, onSelect) } }
+            sections.forEachIndexed { index, section ->
+                item(key = section.title) {
+                    MediaRow(section, onSelect, if (index == 0) firstMovieFocus else null, if (index == 0) appFocus else null)
+                }
+            }
             item {
                 Text(
                     "Movie data and images by TMDB · Availability by JustWatch",
@@ -752,13 +793,19 @@ private fun Home(
 @Composable
 private fun AppDock(
     apps: List<LauncherApp>,
+    listState: LazyListState,
     upFocus: FocusRequester,
     firstFocus: FocusRequester,
+    downFocus: FocusRequester,
     compact: Boolean,
     onLaunch: (LauncherApp) -> Unit,
+    onConfigureApp: (LauncherApp) -> Unit,
+    onManageApps: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
+        state = listState,
+        contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
         modifier = Modifier.height(if (compact) 110.dp else 120.dp).focusGroup(),
     ) {
@@ -767,20 +814,57 @@ private fun AppDock(
                 app,
                 compact,
                 onLaunch,
-                if (index == 0) Modifier.focusRequester(firstFocus).focusProperties { up = upFocus } else Modifier,
+                onConfigureApp,
+                Modifier.then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                    .focusProperties { up = upFocus; down = downFocus },
             )
+        }
+        item(key = "organize") {
+            ShelfActionCard(
+                "Organize", "↔", compact, onManageApps,
+                Modifier.focusProperties { up = upFocus; down = downFocus },
+            )
+        }
+        item(key = "settings") {
+            ShelfActionCard("Settings", "⚙", compact, onSettings, Modifier.focusProperties { up = upFocus; down = downFocus })
         }
     }
 }
 
 @Composable
+private fun ShelfActionCard(label: String, glyph: String, compact: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "$label focus")
+    val width = if (compact) 116.dp else 136.dp
+    val height = if (compact) 68.dp else 78.dp
+    Column(
+        modifier.width(width).graphicsLayer { scaleX = scale; scaleY = scale }
+            .onFocusChanged { focused = it.isFocused }.clickable(role = Role.Button, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.width(width).height(height).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF343048), Color(0xFF1B1A28))))
+                .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = .12f), RoundedCornerShape(if (compact) 16.dp else 19.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Text(glyph, color = if (focused) Color.White else Color.White.copy(alpha = .72f), fontSize = 28.sp) }
+        Spacer(Modifier.height(8.dp))
+        Text(label, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp)
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun AppCard(
     app: LauncherApp,
     compact: Boolean,
     onLaunch: (LauncherApp) -> Unit,
+    onConfigure: (LauncherApp) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var remotePressed by remember { mutableStateOf(false) }
+    var remoteLongPress by remember { mutableStateOf(false) }
     val tileScale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "app tile focus")
     val tileWidth = if (compact) 116.dp else 136.dp
     val tileHeight = if (compact) 68.dp else 78.dp
@@ -794,7 +878,30 @@ private fun AppCard(
         modifier.width(tileWidth)
             .graphicsLayer { scaleX = tileScale; scaleY = tileScale }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button) { onLaunch(app) },
+            .onPreviewKeyEvent { event ->
+                val keyCode = event.nativeKeyEvent.keyCode
+                if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER && keyCode != android.view.KeyEvent.KEYCODE_ENTER) {
+                    return@onPreviewKeyEvent false
+                }
+                when (event.type) {
+                    KeyEventType.KeyDown -> {
+                        remotePressed = true
+                        if (event.nativeKeyEvent.repeatCount > 0 && !remoteLongPress) {
+                            remoteLongPress = true
+                            onConfigure(app)
+                        }
+                        true
+                    }
+                    KeyEventType.KeyUp -> {
+                        if (remotePressed && !remoteLongPress) onLaunch(app)
+                        remotePressed = false
+                        remoteLongPress = false
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .combinedClickable(role = Role.Button, onClick = { onLaunch(app) }, onLongClick = { onConfigure(app) }),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -816,6 +923,68 @@ private fun AppCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(app.name, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun AppConfigDialog(
+    app: LauncherApp,
+    onSave: (String) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember(app) { mutableStateOf(app.name) }
+    var fieldFocused by remember { mutableStateOf(false) }
+    val fieldFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        LaunchedEffect(Unit) {
+            delay(180)
+            fieldFocus.requestFocus()
+            keyboard?.show()
+        }
+        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .88f)), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.width(620.dp).clip(RoundedCornerShape(26.dp))
+                    .background(Brush.verticalGradient(listOf(Color(0xFF272636), Color(0xFF14131D))))
+                    .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp)).padding(28.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    AsyncImage(app.icon, null, Modifier.size(58.dp), contentScale = ContentScale.Fit)
+                    Column {
+                        Text("App options", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        Text("Rename on the Reelora shelf", color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                    }
+                }
+                Spacer(Modifier.height(22.dp))
+                BasicTextField(
+                    value = name,
+                    onValueChange = { name = it.take(40) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 20.sp),
+                    cursorBrush = SolidColor(Coral),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus).onFocusChanged { fieldFocused = it.isFocused },
+                    decorationBox = { field ->
+                        Box(
+                            Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = .07f))
+                                .border(if (fieldFocused) 2.dp else 1.dp, if (fieldFocused) Violet else Color.White.copy(alpha = .14f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 18.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) { field() }
+                    },
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    ActionButton("Reset", glyph = "↺", onClick = onReset)
+                    Spacer(Modifier.width(10.dp))
+                    ActionButton("Cancel", glyph = "×", onClick = onDismiss)
+                    Spacer(Modifier.width(10.dp))
+                    ActionButton("Save", glyph = "✓") { name.trim().takeIf(String::isNotEmpty)?.let(onSave) }
+                }
+            }
+        }
     }
 }
 
@@ -1190,17 +1359,25 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modif
 }
 
 @Composable
-private fun MediaRow(section: CatalogSection, onSelect: (MediaItem) -> Unit) {
+private fun MediaRow(
+    section: CatalogSection,
+    onSelect: (MediaItem) -> Unit,
+    firstFocus: FocusRequester? = null,
+    upFocus: FocusRequester? = null,
+) {
     Column {
         Text(section.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
         Spacer(Modifier.height(12.dp))
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.height(132.dp).focusGroup(),
         ) {
-            items(section.items, key = { "${section.title}-${it.id}" }) { item ->
-                PosterCard(item, onSelect)
+            itemsIndexed(section.items, key = { _, item -> "${section.title}-${item.id}" }) { index, item ->
+                val focusModifier = if (index == 0 && firstFocus != null) {
+                    Modifier.focusRequester(firstFocus).focusProperties { upFocus?.let { up = it } }
+                } else Modifier
+                PosterCard(item, onSelect, focusModifier)
             }
         }
     }
@@ -1215,6 +1392,7 @@ private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier:
             .width(196.dp)
             .height(116.dp)
             .graphicsLayer { scaleX = cardScale; scaleY = cardScale }
+            .zIndex(if (focused) 1f else 0f)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(12.dp))
             .background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))

@@ -61,6 +61,7 @@ class CatalogRepositoryTest {
         assertEquals(listOf("c", "a", "b"), orderedAppKeys(listOf("a", "b", "c"), listOf("missing", "c", "c", "a")))
         assertEquals(listOf("a", "c", "b"), moveAppKey(listOf("a", "b", "c"), "b", 1))
         assertEquals(listOf("a", "b", "c"), moveAppKey(listOf("a", "b", "c"), "a", -1))
+        assertEquals(mapOf("app" to "Cinema"), savedCustomAppNames(mapOf("customName:app" to "Cinema", "other" to "ignored")))
     }
 
     @Test
