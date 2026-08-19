@@ -70,9 +70,27 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,9 +106,10 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -130,6 +149,7 @@ private val Violet = Color(0xFFA978FF)
 private val Coral = Color(0xFFFF8064)
 
 private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
+@Immutable
 private data class LauncherApp(
     val name: String,
     val component: ComponentName,
@@ -181,6 +201,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var settingsOpen by remember { mutableStateOf(false) }
         var appManagerOpen by remember { mutableStateOf(false) }
         var configuredApp by remember { mutableStateOf<LauncherApp?>(null) }
+        var editingApp by remember { mutableStateOf<LauncherApp?>(null) }
+        var movingAppKey by remember { mutableStateOf<String?>(null) }
         var theater by remember { mutableStateOf<TheaterFeature?>(null) }
         var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
@@ -207,6 +229,23 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         }
         val visibleApps = remember(orderedApps, hiddenApps) {
             orderedApps.filterNot { launcherAppKey(it) in hiddenApps }
+        }
+        fun moveApp(app: LauncherApp, offset: Int) {
+            appOrder = moveAppKey(orderedApps.map(::launcherAppKey), launcherAppKey(app), offset)
+            preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
+        }
+        fun moveVisibleApp(app: LauncherApp, offset: Int) {
+            val key = launcherAppKey(app)
+            val visibleKeys = visibleApps.map(::launcherAppKey)
+            val from = visibleKeys.indexOf(key)
+            val targetKey = visibleKeys.getOrNull(from + offset) ?: return
+            val fullOrder = orderedApps.map(::launcherAppKey).toMutableList()
+            val target = fullOrder.indexOf(targetKey)
+            val source = fullOrder.indexOf(key)
+            fullOrder[source] = targetKey
+            fullOrder[target] = key
+            appOrder = fullOrder
+            preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
         }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
@@ -282,6 +321,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onSettings = { settingsOpen = true },
                     onManageApps = { appManagerOpen = true },
                     onConfigureApp = { configuredApp = it },
+                    movingAppKey = movingAppKey,
+                    onMoveApp = ::moveVisibleApp,
+                    onMoveDone = { movingAppKey = null },
                     onSelect = { selected = it },
                 )
                 if (searching) {
@@ -343,10 +385,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 if (appManagerOpen) AppManagerDialog(
                     apps = orderedApps,
                     hiddenApps = hiddenApps,
-                    onMove = { app, offset ->
-                        appOrder = moveAppKey(orderedApps.map(::launcherAppKey), launcherAppKey(app), offset)
-                        preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
-                    },
+                    onMove = ::moveApp,
                     onToggleHidden = { app ->
                         val key = launcherAppKey(app)
                         hiddenApps = if (key in hiddenApps) hiddenApps - key else hiddenApps + key
@@ -360,21 +399,47 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onDismiss = { appManagerOpen = false },
                 )
                 configuredApp?.let { app ->
-                    AppConfigDialog(
+                    AppOptionsDialog(
+                        app = app,
+                        onMove = {
+                            movingAppKey = launcherAppKey(app)
+                            configuredApp = null
+                        },
+                        onRename = {
+                            editingApp = app
+                            configuredApp = null
+                        },
+                        onAppInfo = {
+                            configuredApp = null
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.component.packageName}")),
+                            )
+                        },
+                        onHide = {
+                            val key = launcherAppKey(app)
+                            hiddenApps = hiddenApps + key
+                            preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
+                            configuredApp = null
+                        },
+                        onDismiss = { configuredApp = null },
+                    )
+                }
+                editingApp?.let { app ->
+                    AppRenameDialog(
                         app = app,
                         onSave = { name ->
                             val key = launcherAppKey(app)
                             customAppNames = customAppNames + (key to name)
                             preferences.edit().putString("customName:$key", name).apply()
-                            configuredApp = null
+                            editingApp = null
                         },
                         onReset = {
                             val key = launcherAppKey(app)
                             customAppNames = customAppNames - key
                             preferences.edit().remove("customName:$key").apply()
-                            configuredApp = null
+                            editingApp = null
                         },
-                        onDismiss = { configuredApp = null },
+                        onDismiss = { editingApp = null },
                     )
                 }
             }
@@ -707,6 +772,9 @@ private fun Home(
     onSettings: () -> Unit,
     onManageApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
+    movingAppKey: String?,
+    onMoveApp: (LauncherApp, Int) -> Unit,
+    onMoveDone: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -715,6 +783,8 @@ private fun Home(
     val appFocus = remember { FocusRequester() }
     val firstMovieFocus = remember { FocusRequester() }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
+    val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
+    var lastFocusedAppKey by remember(installedAppKeys) { mutableStateOf(apps.firstOrNull()?.let(::launcherAppKey)) }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
@@ -728,7 +798,7 @@ private fun Home(
     val featured = sections.first()
     var hero by remember(featured) { mutableStateOf(featured.items.first()) }
     var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
-    LaunchedEffect(apps) {
+    LaunchedEffect(installedAppKeys) {
         listState.scrollToItem(0)
         appListState.scrollToItem(0)
         delay(160)
@@ -770,7 +840,12 @@ private fun Home(
                             .focusRequester(heroFocus),
                     )
                     Spacer(Modifier.height(4.dp))
-                    AppDock(apps, appListState, heroFocus, appFocus, firstMovieFocus, compactApps, onLaunch, onConfigureApp, onManageApps, onSettings)
+                    AppDock(
+                        apps, appListState, heroFocus, appFocus, firstMovieFocus, compactApps,
+                        onLaunch, onConfigureApp, movingAppKey, onMoveApp, onMoveDone, onManageApps, onSettings,
+                        lastFocusedAppKey = lastFocusedAppKey,
+                        onAppFocused = { lastFocusedAppKey = launcherAppKey(it) },
+                    )
                 }
             }
             sections.forEachIndexed { index, section ->
@@ -800,39 +875,77 @@ private fun AppDock(
     compact: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
+    movingAppKey: String?,
+    onMoveApp: (LauncherApp, Int) -> Unit,
+    onMoveDone: () -> Unit,
     onManageApps: () -> Unit,
     onSettings: () -> Unit,
+    lastFocusedAppKey: String?,
+    onAppFocused: (LauncherApp) -> Unit,
 ) {
-    LazyRow(
-        state = listState,
-        contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
-        modifier = Modifier.height(if (compact) 110.dp else 120.dp).focusGroup(),
-    ) {
-        itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
-            AppCard(
-                app,
-                compact,
-                onLaunch,
-                onConfigureApp,
-                Modifier.then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
-                    .focusProperties { up = upFocus; down = downFocus },
-            )
+    val scope = rememberCoroutineScope()
+    val showStartFade by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+    }
+    val showEndFade by remember {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            layout.visibleItemsInfo.lastOrNull()?.index?.let { it < layout.totalItemsCount - 1 } == true
         }
-        item(key = "organize") {
-            ShelfActionCard(
-                "Organize", "↔", compact, onManageApps,
-                Modifier.focusProperties { up = upFocus; down = downFocus },
-            )
+    }
+    Box(Modifier.fillMaxWidth().height(if (compact) 110.dp else 120.dp)) {
+        LazyRow(
+            state = listState,
+            contentPadding = PaddingValues(start = 56.dp, end = 84.dp, top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
+            modifier = Modifier.fillMaxSize().focusGroup(),
+        ) {
+            itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
+                AppCard(
+                    app,
+                    compact,
+                    onLaunch,
+                    onConfigureApp,
+                    moving = launcherAppKey(app) == movingAppKey,
+                    movePosition = "${index + 1}/${apps.size}",
+                    onMove = { offset ->
+                        val viewportStart = listState.firstVisibleItemIndex
+                        onMoveApp(app, offset)
+                        scope.launch {
+                            delay(16)
+                            listState.scrollToItem(viewportStart)
+                        }
+                    },
+                    onMoveDone = onMoveDone,
+                    onFocused = { onAppFocused(app) },
+                    modifier = Modifier.animateItem(fadeInSpec = null, placementSpec = tween(150), fadeOutSpec = null)
+                        .then(if (launcherAppKey(app) == lastFocusedAppKey || lastFocusedAppKey == null && index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                        .focusProperties { up = upFocus; down = downFocus },
+                )
+            }
+            item(key = "organize") {
+                ShelfActionCard(
+                    "Organize", Icons.AutoMirrored.Filled.List, compact, onManageApps,
+                    Modifier.focusProperties { up = upFocus; down = downFocus },
+                )
+            }
+            item(key = "settings") {
+                ShelfActionCard("Settings", Icons.Default.Settings, compact, onSettings, Modifier.focusProperties { up = upFocus; down = downFocus })
+            }
         }
-        item(key = "settings") {
-            ShelfActionCard("Settings", "⚙", compact, onSettings, Modifier.focusProperties { up = upFocus; down = downFocus })
-        }
+        if (showStartFade) Box(
+            Modifier.align(Alignment.CenterStart).width(96.dp).fillMaxHeight()
+                .background(Brush.horizontalGradient(listOf(Background, Background, Background.copy(alpha = 0f)))),
+        )
+        if (showEndFade) Box(
+            Modifier.align(Alignment.CenterEnd).width(72.dp).fillMaxHeight()
+                .background(Brush.horizontalGradient(listOf(Background.copy(alpha = 0f), Background))),
+        )
     }
 }
 
 @Composable
-private fun ShelfActionCard(label: String, glyph: String, compact: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ShelfActionCard(label: String, icon: ImageVector, compact: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "$label focus")
     val width = if (compact) 116.dp else 136.dp
@@ -847,7 +960,14 @@ private fun ShelfActionCard(label: String, glyph: String, compact: Boolean, onCl
                 .background(Brush.linearGradient(listOf(Color(0xFF343048), Color(0xFF1B1A28))))
                 .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = .12f), RoundedCornerShape(if (compact) 16.dp else 19.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text(glyph, color = if (focused) Color.White else Color.White.copy(alpha = .72f), fontSize = 28.sp) }
+        ) {
+            Image(
+                imageVector = icon,
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(if (focused) Color.White else Color.White.copy(alpha = .72f)),
+                modifier = Modifier.size(28.dp),
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Text(label, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp)
     }
@@ -860,6 +980,11 @@ private fun AppCard(
     compact: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigure: (LauncherApp) -> Unit,
+    moving: Boolean,
+    movePosition: String,
+    onMove: (Int) -> Unit,
+    onMoveDone: () -> Unit,
+    onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -877,9 +1002,24 @@ private fun AppCard(
     Column(
         modifier.width(tileWidth)
             .graphicsLayer { scaleX = tileScale; scaleY = tileScale }
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
+                if (moving) {
+                    when {
+                        event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> onMove(-1)
+                        event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> onMove(1)
+                        event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_BACK -> onMoveDone()
+                        keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER -> {
+                            if (event.type == KeyEventType.KeyUp) onMoveDone()
+                        }
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER && keyCode != android.view.KeyEvent.KEYCODE_ENTER) {
                     return@onPreviewKeyEvent false
                 }
@@ -901,7 +1041,11 @@ private fun AppCard(
                     else -> false
                 }
             }
-            .combinedClickable(role = Role.Button, onClick = { onLaunch(app) }, onLongClick = { onConfigure(app) }),
+            .combinedClickable(
+                role = Role.Button,
+                onClick = { if (moving) onMoveDone() else onLaunch(app) },
+                onLongClick = { if (!moving) onConfigure(app) },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -919,15 +1063,104 @@ private fun AppCard(
                     Modifier.fillMaxSize()
                 },
             )
-            if (focused) Box(Modifier.fillMaxSize().border(2.dp, Color.White.copy(alpha = .9f), RoundedCornerShape(if (compact) 16.dp else 19.dp)))
+            if (focused || moving) {
+                Box(
+                    Modifier.fillMaxSize().border(
+                        if (moving) 3.dp else 2.dp,
+                        if (moving) Coral else Color.White.copy(alpha = .9f),
+                        RoundedCornerShape(if (compact) 16.dp else 19.dp),
+                    ),
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
-        Text(app.name, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            if (moving) "←  MOVE $movePosition  →" else app.name,
+            color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .60f),
+            fontSize = if (compact) 11.sp else 12.sp,
+            fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 @Composable
-private fun AppConfigDialog(
+private fun AppOptionsDialog(
+    app: LauncherApp,
+    onMove: () -> Unit,
+    onRename: () -> Unit,
+    onAppInfo: () -> Unit,
+    onHide: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val first = remember { FocusRequester() }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        LaunchedEffect(Unit) {
+            delay(160)
+            first.requestFocus()
+        }
+        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.width(700.dp).clip(RoundedCornerShape(26.dp))
+                    .background(Brush.verticalGradient(listOf(Color(0xFF252534), Color(0xFF12121B))))
+                    .border(1.dp, Color.White.copy(alpha = .14f), RoundedCornerShape(26.dp)).padding(28.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    AsyncImage(app.icon, app.name, Modifier.size(58.dp), contentScale = ContentScale.Fit)
+                    Column {
+                        Text(app.name, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("App options", color = Color.White.copy(alpha = .5f), fontSize = 13.sp)
+                    }
+                }
+                Spacer(Modifier.height(22.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AppOptionTile("Move", "Reorder on Home", Icons.AutoMirrored.Filled.List, Modifier.weight(1f).focusRequester(first), onMove)
+                    AppOptionTile("Rename", "Shelf label", Icons.Default.Edit, Modifier.weight(1f), onRename)
+                    AppOptionTile("App info", "Manage or uninstall", Icons.Default.Info, Modifier.weight(1f), onAppInfo)
+                    AppOptionTile("Hide", "Remove from Home", Icons.Default.Delete, Modifier.weight(1f), onHide)
+                }
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    ActionButton("Close", icon = Icons.Default.Close, onClick = onDismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppOptionTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.025f else 1f, tween(100), label = "$title focus")
+    Column(
+        modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (focused) Color.White else Color.White.copy(alpha = .06f))
+            .border(1.dp, if (focused) Color.White else Color.White.copy(alpha = .1f), RoundedCornerShape(18.dp))
+            .clickable(role = Role.Button, onClick = onClick).padding(18.dp),
+    ) {
+        Image(
+            imageVector = icon,
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(if (focused) Coral else Color.White.copy(alpha = .74f)),
+            modifier = Modifier.size(27.dp),
+        )
+        Spacer(Modifier.height(14.dp))
+        Text(title, color = if (focused) Background else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(subtitle, color = if (focused) Background.copy(alpha = .62f) else Color.White.copy(alpha = .44f), fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun AppRenameDialog(
     app: LauncherApp,
     onSave: (String) -> Unit,
     onReset: () -> Unit,
@@ -952,7 +1185,7 @@ private fun AppConfigDialog(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     AsyncImage(app.icon, null, Modifier.size(58.dp), contentScale = ContentScale.Fit)
                     Column {
-                        Text("App options", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        Text("Rename app", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                         Text("Rename on the Reelora shelf", color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
                     }
                 }
@@ -977,11 +1210,11 @@ private fun AppConfigDialog(
                 )
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Reset", glyph = "↺", onClick = onReset)
+                    ActionButton("Reset", icon = Icons.Default.Refresh, onClick = onReset)
                     Spacer(Modifier.width(10.dp))
-                    ActionButton("Cancel", glyph = "×", onClick = onDismiss)
+                    ActionButton("Cancel", icon = Icons.Default.Close, onClick = onDismiss)
                     Spacer(Modifier.width(10.dp))
-                    ActionButton("Save", glyph = "✓") { name.trim().takeIf(String::isNotEmpty)?.let(onSave) }
+                    ActionButton("Save", icon = Icons.Default.Check) { name.trim().takeIf(String::isNotEmpty)?.let(onSave) }
                 }
             }
         }
@@ -1016,7 +1249,7 @@ private fun AppManagerDialog(
                     itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }) { index, app ->
                         val hidden = launcherAppKey(app) in hiddenApps
                         Row(
-                            Modifier.fillMaxWidth().animateItem().clip(RoundedCornerShape(16.dp))
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                                 .background(Color.White.copy(alpha = if (hidden) .035f else .075f)).padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1029,20 +1262,20 @@ private fun AppManagerDialog(
                             ActionButton(
                                 "Left",
                                 modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
-                                glyph = "‹",
+                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                             ) { onMove(app, -1) }
-                            ActionButton("Right", glyph = "›") { onMove(app, 1) }
+                            ActionButton("Right", icon = Icons.AutoMirrored.Filled.KeyboardArrowRight) { onMove(app, 1) }
                             ActionButton(
                                 if (hidden) "Show" else "Hide",
-                                glyph = if (hidden) "+" else "−",
+                                icon = if (hidden) Icons.Default.Add else Icons.Default.Delete,
                             ) { onToggleHidden(app) }
-                            ActionButton("Info", glyph = "ⓘ") { onAppInfo(app) }
+                            ActionButton("Info", icon = Icons.Default.Info) { onAppInfo(app) }
                         }
                     }
                 }
                 if (apps.isEmpty()) Text("No launchable apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.weight(1f))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, glyph = "✓", onClick = onDismiss)
+                    ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, icon = Icons.Default.Check, onClick = onDismiss)
                 }
             }
         }
@@ -1081,7 +1314,7 @@ private fun SettingsDialog(
                         Text("Settings", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                         Text("A quiet home for apps and discovery", color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
                     }
-                    ActionButton("Done", glyph = "✓", onClick = onDismiss)
+                    ActionButton("Done", icon = Icons.Default.Check, onClick = onDismiss)
                 }
                 Spacer(Modifier.height(20.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1093,11 +1326,11 @@ private fun SettingsDialog(
                         Text("Find, arrange and size your Home apps", color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ActionButton("Search", modifier = Modifier.focusRequester(first), glyph = "⌕", onClick = onSearch)
-                            ActionButton("Organize${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", glyph = "↔", onClick = onManageApps)
+                            ActionButton("Search", modifier = Modifier.focusRequester(first), icon = Icons.Default.Search, onClick = onSearch)
+                            ActionButton("Organize${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", icon = Icons.AutoMirrored.Filled.List, onClick = onManageApps)
                         }
                         Spacer(Modifier.height(10.dp))
-                        ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", glyph = "▤") {
+                        ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", icon = Icons.AutoMirrored.Filled.List) {
                             onCompactApps(!compactApps)
                         }
                     }
@@ -1109,10 +1342,10 @@ private fun SettingsDialog(
                         Text("Play trailers when the launcher rests", color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ActionButton(if (theaterEnabled) "On" else "Off", glyph = if (theaterEnabled) "●" else "○") {
+                            ActionButton(if (theaterEnabled) "On" else "Off", icon = if (theaterEnabled) Icons.Default.PlayArrow else Icons.Default.Close) {
                                 onTheaterEnabled(!theaterEnabled)
                             }
-                            ActionButton("After $idleMinutes min", glyph = "◷") {
+                            ActionButton("After $idleMinutes min") {
                                 onIdleMinutes(nextTheaterIdleMinutes(idleMinutes))
                             }
                         }
@@ -1131,8 +1364,8 @@ private fun SettingsDialog(
                         Text("Home and Android controls", color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ActionButton("Default home", glyph = "⌂", onClick = onHomeSettings)
-                        ActionButton("Android", glyph = "⚙", onClick = onSystemSettings)
+                        ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
+                        ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
                     }
                 }
             }
@@ -1210,7 +1443,7 @@ private fun SearchDialog(
                     Text("Search", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                     Text("Movies, series and animation", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
                 }
-                ActionButton("Close", glyph = "×", onClick = onDismiss)
+                ActionButton("Close", icon = Icons.Default.Close, onClick = onDismiss)
             }
             Spacer(Modifier.height(22.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1245,7 +1478,7 @@ private fun SearchDialog(
                         }
                     },
                 )
-                if (voiceAvailable) ActionButton("Voice", glyph = "✦") { voice.launch(voiceIntent) }
+                if (voiceAvailable) ActionButton("Voice") { voice.launch(voiceIntent) }
             }
             Spacer(Modifier.height(24.dp))
             val shown = if (query.trim().length < 2) suggestions else results
@@ -1437,7 +1670,7 @@ private fun ActionButton(
     text: String,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
-    glyph: String? = null,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1454,7 +1687,14 @@ private fun ActionButton(
             .padding(horizontal = 22.dp, vertical = 11.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            glyph?.let { Text(it, color = if (focused) Coral else Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold) }
+            icon?.let {
+                Image(
+                    imageVector = it,
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(if (focused) Coral else Color.White),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
             Text(text, color = if (focused) Background else Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         }
     }
@@ -1519,11 +1759,11 @@ private fun DetailsDialog(
                         "Back",
                         modifier = Modifier.focusRequester(requester),
                         onFocused = restoreTop,
-                        glyph = "‹",
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
                         onClick = onDismiss,
                     )
                     details?.trailer?.let { trailer ->
-                        ActionButton("Play trailer", onFocused = restoreTop, glyph = "▶") { onPlayTrailer(trailer) }
+                        ActionButton("Play trailer", onFocused = restoreTop, icon = Icons.Default.PlayArrow) { onPlayTrailer(trailer) }
                     }
                     if (details == null) LoadingBlock(132.dp, 42.dp, 10.dp)
                 }
