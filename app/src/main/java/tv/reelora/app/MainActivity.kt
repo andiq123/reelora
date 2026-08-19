@@ -1748,7 +1748,7 @@ private fun DetailsDialog(
     var selectedActor by remember(item.id) { mutableStateOf<CastMember?>(null) }
     var actorTitles by remember(item.id) { mutableStateOf<List<MediaItem>?>(null) }
     var actorLoading by remember(item.id) { mutableStateOf(false) }
-    val artwork = item.backdropUrl ?: details?.backdrops?.firstOrNull()
+    val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: item.backdropUrl
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
     TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f), ambient = false) { close ->
