@@ -106,6 +106,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -131,6 +132,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 private val Background = Color(0xFF080A0F)
 private val Surface = Color(0xFF171A22)
@@ -194,6 +197,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
         var settingsOpen by remember { mutableStateOf(false) }
+        var weatherLocationOpen by remember { mutableStateOf(false) }
         var hiddenAppsOpen by remember { mutableStateOf(false) }
         var configuredApp by remember { mutableStateOf<LauncherApp?>(null) }
         var editingApp by remember { mutableStateOf<LauncherApp?>(null) }
@@ -211,6 +215,12 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             mutableStateOf(preferences.getInt("idleMinutes", 3).takeIf { it in THEATER_IDLE_OPTIONS } ?: 3)
         }
         var compactApps by remember { mutableStateOf(preferences.getBoolean("compactApps", false)) }
+        var weatherLocation by remember { mutableStateOf(preferences.getString("weatherLocation", "Chișinău").orEmpty()) }
+        var weatherCelsius by remember { mutableStateOf(preferences.getBoolean("weatherCelsius", true)) }
+        var weatherLatitude by remember { mutableStateOf(preferences.getString("weatherLatitude", null)?.toDoubleOrNull()) }
+        var weatherLongitude by remember { mutableStateOf(preferences.getString("weatherLongitude", null)?.toDoubleOrNull()) }
+        var use24HourClock by remember { mutableStateOf(preferences.getBoolean("use24HourClock", true)) }
+        var weather by remember { mutableStateOf<WeatherNow?>(null) }
         var appOrder by remember {
             mutableStateOf(preferences.getString("appOrder", "").orEmpty().split(',').filter(String::isNotBlank))
         }
@@ -278,6 +288,12 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         LaunchedEffect(Unit) {
             result = CatalogRepository.load()
         }
+        LaunchedEffect(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude) {
+            while (true) {
+                weather = WeatherRepository.current(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude)
+                delay(30 * 60_000L)
+            }
+        }
         LaunchedEffect(isForeground) {
             if (isForeground) apps = withContext(Dispatchers.IO) { installedTvApps(context) }
         }
@@ -320,6 +336,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 Home(
                     catalog,
                     apps = visibleApps,
+                    weather = weather,
+                    use24HourClock = use24HourClock,
                     compactApps = compactApps,
                     onLaunch = ::launchApp,
                     onSearch = { searching = true },
@@ -360,6 +378,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
                     compactApps = compactApps,
+                    weatherLocation = weatherLocation,
+                    weatherCelsius = weatherCelsius,
+                    use24HourClock = use24HourClock,
                     hiddenAppCount = orderedApps.count { launcherAppKey(it) in hiddenApps },
                     onSearch = {
                         settingsOpen = false
@@ -377,6 +398,18 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         compactApps = it
                         preferences.edit().putBoolean("compactApps", it).apply()
                     },
+                    onWeatherLocation = {
+                        settingsOpen = false
+                        weatherLocationOpen = true
+                    },
+                    onWeatherCelsius = {
+                        weatherCelsius = it
+                        preferences.edit().putBoolean("weatherCelsius", it).apply()
+                    },
+                    onClockFormat = {
+                        use24HourClock = it
+                        preferences.edit().putBoolean("use24HourClock", it).apply()
+                    },
                     onHiddenApps = {
                         settingsOpen = false
                         hiddenAppsOpen = true
@@ -387,6 +420,25 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                             .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
                     },
                     onDismiss = { settingsOpen = false },
+                )
+                if (weatherLocationOpen) WeatherLocationDialog(
+                    location = weatherLocation,
+                    onSave = { place ->
+                        weatherLocation = place.label
+                        weatherLatitude = place.latitude
+                        weatherLongitude = place.longitude
+                        preferences.edit()
+                            .putString("weatherLocation", place.label)
+                            .putString("weatherLatitude", place.latitude.toString())
+                            .putString("weatherLongitude", place.longitude.toString())
+                            .apply()
+                        weatherLocationOpen = false
+                        settingsOpen = true
+                    },
+                    onDismiss = {
+                        weatherLocationOpen = false
+                        settingsOpen = true
+                    },
                 )
                 if (hiddenAppsOpen) HiddenAppsDialog(
                     apps = orderedApps.filter { launcherAppKey(it) in hiddenApps },
@@ -458,6 +510,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 selected = null
                 searching = false
                 settingsOpen = false
+                weatherLocationOpen = false
                 hiddenAppsOpen = false
                 recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
             }
@@ -679,22 +732,11 @@ class TrailerActivity : Activity() {
 
 @Composable
 private fun Loading() {
-    val motion = rememberInfiniteTransition(label = "loading")
-    val pulse by motion.animateFloat(
-        initialValue = .94f,
-        targetValue = 1.02f,
-        animationSpec = infiniteRepeatable(tween(1_100), RepeatMode.Reverse),
-        label = "loading pulse",
-    )
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Image(
             painterResource(R.drawable.reelora_mark),
             "Reelora TV",
-            Modifier.size(104.dp).graphicsLayer {
-                scaleX = pulse
-                scaleY = pulse
-                alpha = .72f + (pulse - .94f) * 2.5f
-            },
+            Modifier.size(88.dp).graphicsLayer { alpha = .82f },
         )
     }
 }
@@ -764,6 +806,8 @@ private fun artworkModel(url: String): ImageRequest {
 private fun Home(
     catalog: CatalogResult,
     apps: List<LauncherApp>,
+    weather: WeatherNow?,
+    use24HourClock: Boolean,
     compactApps: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
@@ -781,7 +825,7 @@ private fun Home(
     val context = LocalContext.current
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
-    val lastAppRowFocus = remember { arrayOf<FocusRequester?>(null) }
+    var lastAppRowFocus by remember { mutableStateOf<FocusRequester?>(null) }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
     val movieRowFocus = remember(sections.size) { List(sections.size) { FocusRequester() } }
     val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
@@ -831,11 +875,13 @@ private fun Home(
             Column {
                 Hero(
                     hero,
+                    weather,
+                    use24HourClock,
                     onSelect,
                     Modifier
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                                (lastAppRowFocus[0] ?: appFocus).requestFocus()
+                                (lastAppRowFocus ?: appFocus).requestFocus()
                                 true
                             } else false
                         }
@@ -845,7 +891,7 @@ private fun Home(
                 AppDock(
                     apps, appListState, heroFocus, appFocus, movieRowFocus.first(), compactApps,
                     onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
-                    onRowFocused = { lastAppRowFocus[0] = it },
+                    onRowFocused = { lastAppRowFocus = it },
                 )
             }
             sections.forEachIndexed { index, section ->
@@ -853,12 +899,12 @@ private fun Home(
                     section,
                     onSelect,
                     movieRowFocus[index],
-                    if (index == 0) appFocus else movieRowFocus[index - 1],
+                    if (index == 0) lastAppRowFocus ?: appFocus else movieRowFocus[index - 1],
                     movieRowFocus.getOrNull(index + 1),
                 )
             }
             Text(
-                "Movie data and images by TMDB · Availability by JustWatch",
+                "Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo",
                 color = Color.White.copy(alpha = .38f),
                 fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = 48.dp),
@@ -894,11 +940,11 @@ private fun AppDock(
     }
     Box(
         Modifier.fillMaxWidth().height(if (compact) 110.dp else 120.dp)
-            .padding(start = 48.dp, end = 96.dp),
+            .padding(horizontal = 48.dp),
     ) {
         LazyRow(
             state = listState,
-            contentPadding = PaddingValues(start = 8.dp, end = 32.dp, top = 8.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
             modifier = Modifier.fillMaxSize().focusGroup(),
         ) {
@@ -945,11 +991,11 @@ private fun AppDock(
             }
         }
         if (showStartFade) Box(
-            Modifier.align(Alignment.CenterStart).width(96.dp).fillMaxHeight()
+            Modifier.align(Alignment.CenterStart).width(48.dp).fillMaxHeight()
                 .background(Brush.horizontalGradient(listOf(Background, Background, Background.copy(alpha = 0f)))),
         )
         if (showEndFade) Box(
-            Modifier.align(Alignment.CenterEnd).width(88.dp).fillMaxHeight()
+            Modifier.align(Alignment.CenterEnd).width(48.dp).fillMaxHeight()
                 .background(Brush.horizontalGradient(listOf(Background.copy(alpha = 0f), Background))),
         )
     }
@@ -1366,15 +1412,90 @@ private fun HiddenAppsDialog(
 }
 
 @Composable
+private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Unit, onDismiss: () -> Unit) {
+    var value by remember(location) { mutableStateOf(location) }
+    var selected by remember { mutableStateOf<WeatherPlace?>(null) }
+    var suggestions by remember { mutableStateOf(emptyList<WeatherPlace>()) }
+    var loading by remember { mutableStateOf(false) }
+    val field = remember { FocusRequester() }
+    val confirm = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) { delay(180); field.requestFocus(); keyboard?.show() }
+    LaunchedEffect(selected) {
+        if (selected != null) {
+            keyboard?.hide()
+            delay(80)
+            confirm.requestFocus()
+        }
+    }
+    LaunchedEffect(value) {
+        if (value == selected?.label || value.trim().length < 2) {
+            suggestions = emptyList()
+            loading = false
+            return@LaunchedEffect
+        }
+        selected = null
+        loading = true
+        delay(300)
+        suggestions = WeatherRepository.locations(value)
+        loading = false
+    }
+    TvDialog(onDismiss, Modifier.width(700.dp).height(620.dp)) { close ->
+        Column(Modifier.padding(DialogPadding)) {
+            DialogHeader("Weather location", "Search, choose, then confirm")
+            Spacer(Modifier.height(GapLarge))
+            TvTextField(value, { value = it.take(60) }, "City", Modifier.fillMaxWidth().focusRequester(field))
+            Spacer(Modifier.height(Gap))
+            Text(
+                when {
+                    loading -> "Searching…"
+                    selected != null -> "Selected · ${selected?.label}"
+                    value.trim().length < 2 -> "Type at least two letters"
+                    suggestions.isEmpty() -> "No locations found"
+                    else -> "Choose the correct location"
+                },
+                color = Color.White.copy(alpha = .52f),
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(Gap))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                suggestions.take(5).forEach { place ->
+                    ActionButton(place.label, Modifier.fillMaxWidth()) {
+                        selected = place
+                        value = place.label
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ActionButton("Cancel", icon = Icons.Default.Close, onClick = close)
+                selected?.let { place ->
+                    Spacer(Modifier.width(Gap))
+                    ActionButton("Use location", Modifier.focusRequester(confirm), icon = Icons.Default.Check) { onSave(place) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsDialog(
     theaterEnabled: Boolean,
     idleMinutes: Int,
     compactApps: Boolean,
+    weatherLocation: String,
+    weatherCelsius: Boolean,
+    use24HourClock: Boolean,
     hiddenAppCount: Int,
     onSearch: () -> Unit,
     onTheaterEnabled: (Boolean) -> Unit,
     onIdleMinutes: (Int) -> Unit,
     onCompactApps: (Boolean) -> Unit,
+    onWeatherLocation: () -> Unit,
+    onWeatherCelsius: (Boolean) -> Unit,
+    onClockFormat: (Boolean) -> Unit,
     onHiddenApps: () -> Unit,
     onSystemSettings: () -> Unit,
     onHomeSettings: () -> Unit,
@@ -1415,10 +1536,19 @@ private fun SettingsDialog(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                SettingsPanel("SYSTEM", "Home and Android controls", Modifier.fillMaxWidth()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                        ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
-                        ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    SettingsPanel("WEATHER & TIME", "Location, temperature and clock", Modifier.weight(1f)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                            ActionButton(weatherLocation.take(14), onClick = onWeatherLocation)
+                            ActionButton(if (weatherCelsius) "°C" else "°F") { onWeatherCelsius(!weatherCelsius) }
+                            ActionButton(if (use24HourClock) "24 h" else "12 h") { onClockFormat(!use24HourClock) }
+                        }
+                    }
+                    SettingsPanel("SYSTEM", "Home and Android controls", Modifier.weight(1f)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                            ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
+                            ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
+                        }
                     }
                 }
         }
@@ -1509,7 +1639,13 @@ private fun SearchDialog(
 }
 
 @Composable
-private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
+private fun Hero(
+    item: MediaItem,
+    weather: WeatherNow?,
+    use24HourClock: Boolean,
+    onSelect: (MediaItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     var focused by remember { mutableStateOf(false) }
     var detailsVisible by remember(item.id) { mutableStateOf(false) }
     val detailsAlpha by animateFloatAsState(if (detailsVisible) 1f else 0f, tween(180), label = "featured details")
@@ -1550,6 +1686,7 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modif
                 )
             )
         )
+        HomeStatus(weather, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 30.dp, end = 58.dp))
         Column(
             Modifier.fillMaxHeight().width(620.dp).padding(start = 58.dp, top = 42.dp, end = 24.dp, bottom = 28.dp),
         ) {
@@ -1580,6 +1717,42 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modif
             Text("View", color = if (focused) Background else Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
     }
+}
+
+@Composable
+private fun HomeStatus(weather: WeatherNow?, use24HourClock: Boolean, modifier: Modifier = Modifier) {
+    var time by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L - System.currentTimeMillis() % 60_000L)
+            time = LocalTime.now()
+        }
+    }
+    Row(
+        modifier.clip(RoundedCornerShape(16.dp)).background(Background.copy(alpha = .68f))
+            .border(1.dp, Color.White.copy(alpha = .1f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(formatHomeTime(time, use24HourClock), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        weather?.let {
+            Text("${weatherSymbol(it.code)}  ${it.temperature}°", color = Color.White.copy(alpha = .82f), fontSize = 15.sp)
+        }
+    }
+}
+
+internal fun formatHomeTime(time: LocalTime, use24HourClock: Boolean) =
+    time.format(DateTimeFormatter.ofPattern(if (use24HourClock) "HH:mm" else "h:mm a"))
+
+internal fun weatherSymbol(code: Int) = when (code) {
+    0 -> "☀"
+    1, 2 -> "⛅"
+    3, 45, 48 -> "☁"
+    in 51..67, in 80..82 -> "☂"
+    in 71..77, in 85..86 -> "❄"
+    in 95..99 -> "ϟ"
+    else -> "·"
 }
 
 @Composable

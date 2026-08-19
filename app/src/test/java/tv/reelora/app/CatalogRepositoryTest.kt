@@ -6,16 +6,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlinx.coroutines.runBlocking
 import java.time.LocalDate
+import java.time.LocalTime
 
 class CatalogRepositoryTest {
     @Test
     fun catalogRoutesCoverDistinctTvSections() {
         val specs = CatalogRepository.specs
         assertEquals(5, CatalogRepository.pageTitles.size)
-        assertEquals(20, specs.map { it.title }.distinct().size)
-        assertTrue(CatalogRepository.pageTitles.indices.all { page -> specs.count { it.page == page } == 4 })
+        assertEquals(6, specs.map { it.title }.distinct().size)
+        assertTrue(CatalogRepository.pageTitles.indices.all { page -> specs.any { it.page == page } })
         assertTrue(specs.single { it.title == "Popular animation" }.path.contains("with_genres=16"))
         assertTrue(specs.any { it.mediaType == "tv" })
+    }
+
+    @Test
+    fun weatherCodesUseCompactTvSymbols() {
+        assertEquals("☀", weatherSymbol(0))
+        assertEquals("☂", weatherSymbol(61))
+        assertEquals("❄", weatherSymbol(71))
+    }
+
+    @Test
+    fun clockDefaultsCanRenderEitherTvFormat() {
+        val time = LocalTime.of(18, 5)
+        assertEquals("18:05", formatHomeTime(time, true))
+        assertEquals("6:05 PM", formatHomeTime(time, false))
     }
 
     @Test

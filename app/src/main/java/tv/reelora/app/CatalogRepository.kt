@@ -53,40 +53,62 @@ data class MediaDetails(
 @Immutable data class CatalogSection(val page: Int, val title: String, val items: List<MediaItem>)
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
+@Immutable data class WeatherNow(val temperature: Int, val code: Int)
+@Immutable
+data class WeatherPlace(
+    val name: String,
+    val area: String,
+    val country: String,
+    val latitude: Double,
+    val longitude: Double,
+) {
+    val label = listOf(name, area, country).filter(String::isNotBlank).distinct().joinToString(", ")
+}
+
+object WeatherRepository {
+    suspend fun locations(query: String): List<WeatherPlace> = runCatching {
+        val name = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString())
+        val results = readJson("https://geocoding-api.open-meteo.com/v1/search?name=$name&count=5&language=en")
+            .optJSONArray("results") ?: return emptyList()
+        buildList {
+            for (index in 0 until results.length()) results.getJSONObject(index).let { place ->
+                add(
+                    WeatherPlace(
+                        place.optString("name"),
+                        place.optString("admin1"),
+                        place.optString("country"),
+                        place.getDouble("latitude"),
+                        place.getDouble("longitude"),
+                    )
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    suspend fun current(location: String, celsius: Boolean, latitude: Double? = null, longitude: Double? = null): WeatherNow? = runCatching {
+        val place = if (latitude != null && longitude != null) latitude to longitude else {
+            locations(location).firstOrNull()?.let { it.latitude to it.longitude } ?: return null
+        }
+        val unit = if (celsius) "celsius" else "fahrenheit"
+        val current = readJson(
+            "https://api.open-meteo.com/v1/forecast?latitude=${place.first}&longitude=${place.second}&current=temperature_2m,weather_code&temperature_unit=$unit",
+        ).getJSONObject("current")
+        WeatherNow(current.getDouble("temperature_2m").toInt(), current.getInt("weather_code"))
+    }.getOrNull()
+}
 
 object CatalogRepository {
     private val personCredits = ConcurrentHashMap<Int, List<MediaItem>>()
     private val mediaDetails = ConcurrentHashMap<String, MediaDetails>()
-    private val today = LocalDate.now().format(DateTimeFormatter.ISO_DATE)
-    private val recentDate = LocalDate.now().minusMonths(8).format(DateTimeFormatter.ISO_DATE)
-
     val pageTitles = listOf("Discover", "In cinemas", "Movies", "TV series", "Animation")
 
     val specs = listOf(
-        CatalogSpec(0, "Trending today", "/trending/all/day", "movie"),
         CatalogSpec(0, "Trending this week", "/trending/all/week", "movie"),
-        CatalogSpec(0, "Highly rated", "/discover/movie?sort_by=vote_average.desc&vote_count.gte=1000", "movie"),
-        CatalogSpec(0, "Hidden gems", "/discover/movie?sort_by=vote_average.desc&vote_count.gte=250&vote_count.lte=1500", "movie"),
-
         CatalogSpec(1, "Now in cinemas", "/movie/now_playing", "movie"),
         CatalogSpec(1, "Coming soon", "/movie/upcoming", "movie"),
-        CatalogSpec(1, "Popular new releases", "/discover/movie?sort_by=popularity.desc&primary_release_date.gte=$recentDate&primary_release_date.lte=$today", "movie"),
-        CatalogSpec(1, "More coming soon", "/movie/upcoming?page=2", "movie"),
-
-        CatalogSpec(2, "Popular movies", "/movie/popular", "movie"),
         CatalogSpec(2, "Top rated movies", "/movie/top_rated", "movie"),
-        CatalogSpec(2, "Action & adventure", "/discover/movie?with_genres=28|12&sort_by=popularity.desc", "movie"),
-        CatalogSpec(2, "Science fiction", "/discover/movie?with_genres=878&sort_by=popularity.desc", "movie"),
-
         CatalogSpec(3, "Popular series", "/tv/popular", "tv"),
-        CatalogSpec(3, "Airing today", "/tv/airing_today", "tv"),
-        CatalogSpec(3, "Currently on air", "/tv/on_the_air", "tv"),
-        CatalogSpec(3, "Top rated series", "/tv/top_rated", "tv"),
-
         CatalogSpec(4, "Popular animation", "/discover/movie?with_genres=16&sort_by=popularity.desc", "movie"),
-        CatalogSpec(4, "For the whole family", "/discover/movie?with_genres=16,10751&sort_by=popularity.desc", "movie"),
-        CatalogSpec(4, "Anime movies", "/discover/movie?with_genres=16&with_origin_country=JP&sort_by=popularity.desc", "movie"),
-        CatalogSpec(4, "Animated series", "/discover/tv?with_genres=16&sort_by=popularity.desc", "tv"),
     )
 
     suspend fun load(): CatalogResult = withContext(Dispatchers.Default) {
@@ -234,22 +256,10 @@ object CatalogRepository {
             }
         }
 
-    private suspend fun getJson(path: String, token: String) = withContext(Dispatchers.IO) {
-        val separator = if ('?' in path) '&' else '?'
-        val connection = URL("https://api.themoviedb.org/3$path${separator}language=en-US&include_adult=false")
-            .openConnection() as HttpURLConnection
-        connection.connectTimeout = 8_000
-        connection.readTimeout = 8_000
-        connection.setRequestProperty("Authorization", "Bearer $token")
-        connection.setRequestProperty("Accept", "application/json")
-
-        try {
-            check(connection.responseCode in 200..299) { "TMDB returned ${connection.responseCode}" }
-            JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private suspend fun getJson(path: String, token: String) = readJson(
+        "https://api.themoviedb.org/3$path${if ('?' in path) '&' else '?'}language=en-US&include_adult=false",
+        token,
+    )
 
     private fun JSONObject.image(key: String, size: String) =
         optString(key).takeIf { it.isNotBlank() && it != "null" }?.let { "https://image.tmdb.org/t/p/$size$it" }
@@ -286,6 +296,20 @@ object CatalogRepository {
         availability = null,
         backdrops = emptyList(),
     )
+}
+
+private suspend fun readJson(url: String, token: String? = null) = withContext(Dispatchers.IO) {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.connectTimeout = 5_000
+    connection.readTimeout = 5_000
+    token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+    connection.setRequestProperty("Accept", "application/json")
+    try {
+        check(connection.responseCode in 200..299) { "Request failed: ${connection.responseCode}" }
+        JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+    } finally {
+        connection.disconnect()
+    }
 }
 
 internal fun releaseLabel(date: String, today: LocalDate = LocalDate.now()): String {
