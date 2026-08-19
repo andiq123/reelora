@@ -50,12 +50,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -786,14 +788,14 @@ private fun Home(
     onMoveDone: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
-    val listState = rememberLazyListState()
+    val listState = rememberScrollState()
     val appListState = rememberLazyListState()
     val context = LocalContext.current
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
     val lastAppRowFocus = remember { arrayOf<FocusRequester?>(null) }
-    val firstMovieFocus = remember { FocusRequester() }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
+    val movieRowFocus = remember(sections.size) { List(sections.size) { FocusRequester() } }
     val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
@@ -809,7 +811,7 @@ private fun Home(
     var hero by remember(featured) { mutableStateOf(featured.items.first()) }
     var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
     LaunchedEffect(installedAppKeys) {
-        listState.scrollToItem(0)
+        listState.scrollTo(0)
         appListState.scrollToItem(0)
         delay(160)
         if (apps.isEmpty()) heroFocus.requestFocus() else appFocus.requestFocus()
@@ -827,11 +829,9 @@ private fun Home(
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides stableBringIntoView) {
-        LazyColumn(
-            state = listState,
-            contentPadding = PaddingValues(bottom = 48.dp),
+        Column(
             verticalArrangement = Arrangement.spacedBy(30.dp),
-            modifier = Modifier.fillMaxSize().onPreviewKeyEvent { event ->
+            modifier = Modifier.fillMaxSize().verticalScroll(listState).padding(bottom = 48.dp).onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.Menu -> { onSettings(); true }
@@ -840,41 +840,41 @@ private fun Home(
                 }
             },
         ) {
-            item(key = "home") {
-                Column {
-                    Hero(
-                        hero,
-                        onSelect,
-                        Modifier
-                            .onPreviewKeyEvent { event ->
-                                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                                    (lastAppRowFocus[0] ?: appFocus).requestFocus()
-                                    true
-                                } else false
-                            }
-                            .focusRequester(heroFocus),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    AppDock(
-                        apps, appListState, heroFocus, appFocus, firstMovieFocus, compactApps,
-                        onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onManageApps, onSettings,
-                        onRowFocused = { lastAppRowFocus[0] = it },
-                    )
-                }
-            }
-            sections.forEachIndexed { index, section ->
-                item(key = section.title) {
-                    MediaRow(section, onSelect, if (index == 0) firstMovieFocus else null, if (index == 0) appFocus else null)
-                }
-            }
-            item {
-                Text(
-                    "Movie data and images by TMDB · Availability by JustWatch",
-                    color = Color.White.copy(alpha = .38f),
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(horizontal = 48.dp),
+            Column {
+                Hero(
+                    hero,
+                    onSelect,
+                    Modifier
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                                (lastAppRowFocus[0] ?: appFocus).requestFocus()
+                                true
+                            } else false
+                        }
+                        .focusRequester(heroFocus),
+                )
+                Spacer(Modifier.height(4.dp))
+                AppDock(
+                    apps, appListState, heroFocus, appFocus, movieRowFocus.first(), compactApps,
+                    onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onManageApps, onSettings,
+                    onRowFocused = { lastAppRowFocus[0] = it },
                 )
             }
+            sections.forEachIndexed { index, section ->
+                MediaRow(
+                    section,
+                    onSelect,
+                    movieRowFocus[index],
+                    if (index == 0) appFocus else movieRowFocus[index - 1],
+                    movieRowFocus.getOrNull(index + 1),
+                )
+            }
+            Text(
+                "Movie data and images by TMDB · Availability by JustWatch",
+                color = Color.White.copy(alpha = .38f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 48.dp),
+            )
         }
     }
 }
@@ -1604,8 +1604,9 @@ private fun Hero(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modif
 private fun MediaRow(
     section: CatalogSection,
     onSelect: (MediaItem) -> Unit,
-    firstFocus: FocusRequester? = null,
-    upFocus: FocusRequester? = null,
+    firstFocus: FocusRequester,
+    upFocus: FocusRequester,
+    downFocus: FocusRequester?,
 ) {
     Column {
         Text(section.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
@@ -1615,7 +1616,11 @@ private fun MediaRow(
             onSelect,
             modifier = Modifier.height(132.dp),
             contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
-            firstModifier = if (firstFocus != null) Modifier.focusRequester(firstFocus).focusProperties { upFocus?.let { up = it } } else Modifier,
+            firstModifier = Modifier.focusRequester(firstFocus),
+            itemModifier = Modifier.focusProperties {
+                up = upFocus
+                downFocus?.let { down = it }
+            },
         )
     }
 }
@@ -1627,6 +1632,7 @@ private fun PosterStrip(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(start = 8.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
     firstModifier: Modifier = Modifier,
+    itemModifier: Modifier = Modifier,
 ) {
     LazyRow(
         contentPadding = contentPadding,
@@ -1634,7 +1640,7 @@ private fun PosterStrip(
         modifier = modifier.focusGroup(),
     ) {
         itemsIndexed(items, key = { _, item -> mediaKey(item) }) { index, item ->
-            PosterCard(item, onSelect, if (index == 0) firstModifier else Modifier)
+            PosterCard(item, onSelect, (if (index == 0) firstModifier else Modifier).then(itemModifier))
         }
     }
 }
