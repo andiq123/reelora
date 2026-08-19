@@ -64,10 +64,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -197,7 +194,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
         var settingsOpen by remember { mutableStateOf(false) }
-        var appManagerOpen by remember { mutableStateOf(false) }
+        var hiddenAppsOpen by remember { mutableStateOf(false) }
         var configuredApp by remember { mutableStateOf<LauncherApp?>(null) }
         var editingApp by remember { mutableStateOf<LauncherApp?>(null) }
         var movingAppKey by remember { mutableStateOf<String?>(null) }
@@ -230,10 +227,6 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             orderedApps.filterNot { launcherAppKey(it) in hiddenApps }
         }
         fun currentAppOrder() = orderedAppKeys(apps.map(::launcherAppKey), appOrder)
-        fun moveApp(app: LauncherApp, offset: Int) {
-            appOrder = moveAppKey(currentAppOrder(), launcherAppKey(app), offset)
-            preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
-        }
         fun moveVisibleApp(app: LauncherApp, offset: Int): Int {
             val key = launcherAppKey(app)
             val fullOrder = currentAppOrder().toMutableList()
@@ -250,6 +243,13 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             appOrder = fullOrder
             preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
             return destination
+        }
+        fun launchApp(app: LauncherApp) {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(app.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure {
+                android.widget.Toast.makeText(context, "Unable to open ${app.name}", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
@@ -321,16 +321,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     catalog,
                     apps = visibleApps,
                     compactApps = compactApps,
-                    onLaunch = { app ->
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(app.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }.onFailure {
-                            android.widget.Toast.makeText(context, "Unable to open ${app.name}", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    },
+                    onLaunch = ::launchApp,
                     onSearch = { searching = true },
                     onSettings = { settingsOpen = true },
-                    onManageApps = { appManagerOpen = true },
+                    onHiddenApps = { hiddenAppsOpen = true },
                     onConfigureApp = { configuredApp = it },
                     movingAppKey = movingAppKey,
                     moveConfirmReady = moveConfirmReady,
@@ -383,9 +377,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         compactApps = it
                         preferences.edit().putBoolean("compactApps", it).apply()
                     },
-                    onManageApps = {
+                    onHiddenApps = {
                         settingsOpen = false
-                        appManagerOpen = true
+                        hiddenAppsOpen = true
                     },
                     onSystemSettings = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) },
                     onHomeSettings = {
@@ -394,21 +388,15 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     },
                     onDismiss = { settingsOpen = false },
                 )
-                if (appManagerOpen) AppManagerDialog(
-                    apps = orderedApps,
-                    hiddenApps = hiddenApps,
-                    onMove = ::moveApp,
-                    onToggleHidden = { app ->
+                if (hiddenAppsOpen) HiddenAppsDialog(
+                    apps = orderedApps.filter { launcherAppKey(it) in hiddenApps },
+                    onLaunch = ::launchApp,
+                    onRestore = { app ->
                         val key = launcherAppKey(app)
-                        hiddenApps = if (key in hiddenApps) hiddenApps - key else hiddenApps + key
+                        hiddenApps = hiddenApps - key
                         preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
                     },
-                    onAppInfo = { app ->
-                        context.startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.component.packageName}")),
-                        )
-                    },
-                    onDismiss = { appManagerOpen = false },
+                    onDismiss = { hiddenAppsOpen = false },
                 )
                 configuredApp?.let { app ->
                     AppOptionsDialog(
@@ -470,7 +458,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 selected = null
                 searching = false
                 settingsOpen = false
-                appManagerOpen = false
+                hiddenAppsOpen = false
                 recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
             }
         }
@@ -780,7 +768,7 @@ private fun Home(
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
-    onManageApps: () -> Unit,
+    onHiddenApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
     moveConfirmReady: Boolean,
@@ -856,7 +844,7 @@ private fun Home(
                 Spacer(Modifier.height(4.dp))
                 AppDock(
                     apps, appListState, heroFocus, appFocus, movieRowFocus.first(), compactApps,
-                    onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onManageApps, onSettings,
+                    onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
                     onRowFocused = { lastAppRowFocus[0] = it },
                 )
             }
@@ -893,7 +881,7 @@ private fun AppDock(
     moveConfirmReady: Boolean,
     onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
-    onManageApps: () -> Unit,
+    onHiddenApps: () -> Unit,
     onSettings: () -> Unit,
     onRowFocused: (FocusRequester) -> Unit,
 ) {
@@ -938,10 +926,11 @@ private fun AppDock(
                         .focusProperties { up = upFocus; down = downFocus },
                 )
             }
-            item(key = "organize") {
-                val itemFocus = remember { FocusRequester() }
+            item(key = "hidden") {
+                val shelfFocus = remember { FocusRequester() }
+                val itemFocus = if (apps.isEmpty()) firstFocus else shelfFocus
                 ShelfActionCard(
-                    "Organize", Icons.AutoMirrored.Filled.List, compact, onManageApps,
+                    "Hidden", Icons.Default.Delete, compact, onHiddenApps,
                     Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused(itemFocus) },
                 )
@@ -1333,49 +1322,42 @@ private fun AppRenameDialog(
 }
 
 @Composable
-private fun AppManagerDialog(
+private fun HiddenAppsDialog(
     apps: List<LauncherApp>,
-    hiddenApps: Set<String>,
-    onMove: (LauncherApp, Int) -> Unit,
-    onToggleHidden: (LauncherApp) -> Unit,
-    onAppInfo: (LauncherApp) -> Unit,
+    onLaunch: (LauncherApp) -> Unit,
+    onRestore: (LauncherApp) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { delay(180); first.requestFocus() }
+    var ready by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(350); ready = true; first.requestFocus() }
     TvDialog(onDismiss, Modifier.width(960.dp).height(640.dp)) { close ->
         Column(Modifier.padding(DialogPadding)) {
-                DialogHeader("Organize apps", "Move, hide, or inspect installed applications")
+                DialogHeader("Hidden apps", "Open an app or return it to Home")
                 Spacer(Modifier.height(GapLarge))
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Gap)) {
                     itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }) { index, app ->
-                        val hidden = launcherAppKey(app) in hiddenApps
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                                .background(Color.White.copy(alpha = if (hidden) .035f else .075f)).padding(12.dp),
+                                .background(Color.White.copy(alpha = .065f)).padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             AsyncImage(app.icon, app.name, Modifier.size(48.dp), contentScale = ContentScale.Fit)
                             Column(Modifier.weight(1f)) {
-                                Text(app.name, color = Color.White.copy(alpha = if (hidden) .48f else .92f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                Text(if (hidden) "Hidden from Home" else "Position ${index + 1}", color = Color.White.copy(alpha = .42f), fontSize = 11.sp)
+                                Text(app.name, color = Color.White.copy(alpha = .92f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Hidden from Home", color = Color.White.copy(alpha = .42f), fontSize = 11.sp)
                             }
                             ActionButton(
-                                "Left",
+                                "Open",
                                 modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                            ) { onMove(app, -1) }
-                            ActionButton("Right", icon = Icons.AutoMirrored.Filled.KeyboardArrowRight) { onMove(app, 1) }
-                            ActionButton(
-                                if (hidden) "Show" else "Hide",
-                                icon = if (hidden) Icons.Default.Add else Icons.Default.Delete,
-                            ) { onToggleHidden(app) }
-                            ActionButton("Info", icon = Icons.Default.Info) { onAppInfo(app) }
+                                icon = Icons.Default.PlayArrow,
+                            ) { if (ready) onLaunch(app) }
+                            ActionButton("Show on Home", icon = Icons.Default.Home) { if (ready) onRestore(app) }
                         }
                     }
                 }
-                if (apps.isEmpty()) Text("No launchable apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.weight(1f))
+                if (apps.isEmpty()) Text("No hidden apps", color = Color.White.copy(alpha = .55f), modifier = Modifier.weight(1f))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, icon = Icons.Default.Check, onClick = close)
                 }
@@ -1393,7 +1375,7 @@ private fun SettingsDialog(
     onTheaterEnabled: (Boolean) -> Unit,
     onIdleMinutes: (Int) -> Unit,
     onCompactApps: (Boolean) -> Unit,
-    onManageApps: () -> Unit,
+    onHiddenApps: () -> Unit,
     onSystemSettings: () -> Unit,
     onHomeSettings: () -> Unit,
     onDismiss: () -> Unit,
@@ -1409,10 +1391,10 @@ private fun SettingsDialog(
                 )
                 Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SettingsPanel("APP SHELF", "Find, arrange and size Home apps", Modifier.weight(1f)) {
+                    SettingsPanel("APP SHELF", "Find and size Home apps", Modifier.weight(1f)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                             ActionButton("Search", modifier = Modifier.focusRequester(first), icon = Icons.Default.Search, onClick = onSearch)
-                            ActionButton("Organize${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", icon = Icons.AutoMirrored.Filled.List, onClick = onManageApps)
+                            ActionButton("Hidden${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", icon = Icons.Default.Delete, onClick = onHiddenApps)
                         }
                         Spacer(Modifier.height(Gap))
                         ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", icon = Icons.AutoMirrored.Filled.List) {
