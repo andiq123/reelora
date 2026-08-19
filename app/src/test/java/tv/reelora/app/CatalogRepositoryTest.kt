@@ -64,6 +64,27 @@ class CatalogRepositoryTest {
     }
 
     @Test
+    fun launcherDiscoveryRowsAreDiverseAndNeverRepeatTitles() {
+        fun item(id: Int) = MediaItem(id, "Title $id", "", "2026", 8.0, 1, "movie", null, null)
+        val catalog = CatalogResult(
+            listOf(
+                CatalogSection(0, "Now in cinemas", listOf(item(1), item(2))),
+                CatalogSection(0, "Trending this week", listOf(item(1), item(3))),
+                CatalogSection(0, "Top rated movies", listOf(item(2), item(4))),
+                CatalogSection(0, "Popular series", listOf(item(5))),
+                CatalogSection(0, "Popular animation", listOf(item(6))),
+                CatalogSection(0, "Coming soon", listOf(item(6), item(7))),
+            ),
+            false,
+        )
+        val sections = launcherMovieSections(catalog)
+        val keys = sections.flatMap { it.items }.map(::mediaKey)
+
+        assertEquals(6, sections.size)
+        assertEquals(keys.distinct(), keys)
+    }
+
+    @Test
     fun releaseBadgeDistinguishesUpcomingAndReleasedTitles() {
         val today = LocalDate.of(2026, 8, 18)
         assertTrue(releaseLabel("2026-09-04", today).startsWith("◷ COMING"))
