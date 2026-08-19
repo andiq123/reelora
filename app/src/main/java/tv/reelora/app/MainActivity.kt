@@ -203,6 +203,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var configuredApp by remember { mutableStateOf<LauncherApp?>(null) }
         var editingApp by remember { mutableStateOf<LauncherApp?>(null) }
         var movingAppKey by remember { mutableStateOf<String?>(null) }
+        var moveConfirmReady by remember { mutableStateOf(false) }
         var theater by remember { mutableStateOf<TheaterFeature?>(null) }
         var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
@@ -230,16 +231,17 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         val visibleApps = remember(orderedApps, hiddenApps) {
             orderedApps.filterNot { launcherAppKey(it) in hiddenApps }
         }
+        fun currentAppOrder() = orderedAppKeys(apps.map(::launcherAppKey), appOrder)
         fun moveApp(app: LauncherApp, offset: Int) {
-            appOrder = moveAppKey(orderedApps.map(::launcherAppKey), launcherAppKey(app), offset)
+            appOrder = moveAppKey(currentAppOrder(), launcherAppKey(app), offset)
             preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
         }
         fun moveVisibleApp(app: LauncherApp, offset: Int) {
             val key = launcherAppKey(app)
-            val visibleKeys = visibleApps.map(::launcherAppKey)
+            val fullOrder = currentAppOrder().toMutableList()
+            val visibleKeys = fullOrder.filterNot { it in hiddenApps }
             val from = visibleKeys.indexOf(key)
             val targetKey = visibleKeys.getOrNull(from + offset) ?: return
-            val fullOrder = orderedApps.map(::launcherAppKey).toMutableList()
             val target = fullOrder.indexOf(targetKey)
             val source = fullOrder.indexOf(key)
             fullOrder[source] = targetKey
@@ -276,6 +278,13 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         }
         LaunchedEffect(isForeground) {
             if (isForeground) apps = withContext(Dispatchers.IO) { installedTvApps(context) }
+        }
+        LaunchedEffect(movingAppKey) {
+            moveConfirmReady = false
+            if (movingAppKey != null) {
+                delay(300)
+                moveConfirmReady = true
+            }
         }
 
         LaunchedEffect(theater?.trailer?.key) {
@@ -322,6 +331,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onManageApps = { appManagerOpen = true },
                     onConfigureApp = { configuredApp = it },
                     movingAppKey = movingAppKey,
+                    moveConfirmReady = moveConfirmReady,
                     onMoveApp = ::moveVisibleApp,
                     onMoveDone = { movingAppKey = null },
                     onSelect = { selected = it },
@@ -773,6 +783,7 @@ private fun Home(
     onManageApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
+    moveConfirmReady: Boolean,
     onMoveApp: (LauncherApp, Int) -> Unit,
     onMoveDone: () -> Unit,
     onSelect: (MediaItem) -> Unit,
@@ -842,7 +853,7 @@ private fun Home(
                     Spacer(Modifier.height(4.dp))
                     AppDock(
                         apps, appListState, heroFocus, appFocus, firstMovieFocus, compactApps,
-                        onLaunch, onConfigureApp, movingAppKey, onMoveApp, onMoveDone, onManageApps, onSettings,
+                        onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onManageApps, onSettings,
                         lastFocusedAppKey = lastFocusedAppKey,
                         onAppFocused = { lastFocusedAppKey = launcherAppKey(it) },
                     )
@@ -876,6 +887,7 @@ private fun AppDock(
     onLaunch: (LauncherApp) -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
+    moveConfirmReady: Boolean,
     onMoveApp: (LauncherApp, Int) -> Unit,
     onMoveDone: () -> Unit,
     onManageApps: () -> Unit,
@@ -907,6 +919,7 @@ private fun AppDock(
                     onLaunch,
                     onConfigureApp,
                     moving = launcherAppKey(app) == movingAppKey,
+                    moveConfirmReady = moveConfirmReady,
                     movePosition = "${index + 1}/${apps.size}",
                     onMove = { offset ->
                         val viewportStart = listState.firstVisibleItemIndex
@@ -981,6 +994,7 @@ private fun AppCard(
     onLaunch: (LauncherApp) -> Unit,
     onConfigure: (LauncherApp) -> Unit,
     moving: Boolean,
+    moveConfirmReady: Boolean,
     movePosition: String,
     onMove: (Int) -> Unit,
     onMoveDone: () -> Unit,
@@ -990,7 +1004,17 @@ private fun AppCard(
     var focused by remember { mutableStateOf(false) }
     var remotePressed by remember { mutableStateOf(false) }
     var remoteLongPress by remember { mutableStateOf(false) }
-    val tileScale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "app tile focus")
+    val tileScale by animateFloatAsState(if (moving) 1.055f else if (focused) 1.04f else 1f, tween(110), label = "app tile focus")
+    val floatOffset = if (moving) {
+        val motion = rememberInfiniteTransition(label = "moving app")
+        val offset by motion.animateFloat(
+            initialValue = -5f,
+            targetValue = 3f,
+            animationSpec = infiniteRepeatable(tween(620), RepeatMode.Reverse),
+            label = "moving app float",
+        )
+        offset
+    } else 0f
     val tileWidth = if (compact) 116.dp else 136.dp
     val tileHeight = if (compact) 68.dp else 78.dp
     val tileHue = remember(app.component.packageName) { (app.component.packageName.hashCode() and 0x7fffffff) % 360f }
@@ -1001,7 +1025,11 @@ private fun AppCard(
     }
     Column(
         modifier.width(tileWidth)
-            .graphicsLayer { scaleX = tileScale; scaleY = tileScale }
+            .graphicsLayer {
+                scaleX = tileScale
+                scaleY = tileScale
+                translationY = floatOffset
+            }
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -1014,7 +1042,7 @@ private fun AppCard(
                         event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> onMove(1)
                         event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_BACK -> onMoveDone()
                         keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER -> {
-                            if (event.type == KeyEventType.KeyUp) onMoveDone()
+                            if (event.type == KeyEventType.KeyUp && moveConfirmReady) onMoveDone()
                         }
                         else -> return@onPreviewKeyEvent false
                     }
@@ -1028,12 +1056,13 @@ private fun AppCard(
                         remotePressed = true
                         if (event.nativeKeyEvent.repeatCount > 0 && !remoteLongPress) {
                             remoteLongPress = true
-                            onConfigure(app)
                         }
                         true
                     }
                     KeyEventType.KeyUp -> {
-                        if (remotePressed && !remoteLongPress) onLaunch(app)
+                        if (remotePressed) {
+                            if (remoteLongPress) onConfigure(app) else onLaunch(app)
+                        }
                         remotePressed = false
                         remoteLongPress = false
                         true
