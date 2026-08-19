@@ -57,6 +57,13 @@ class CatalogRepositoryTest {
     }
 
     @Test
+    fun launcherOrderKeepsSavedAppsAndAppendsNewInstalls() {
+        assertEquals(listOf("c", "a", "b"), orderedAppKeys(listOf("a", "b", "c"), listOf("missing", "c", "c", "a")))
+        assertEquals(listOf("a", "c", "b"), moveAppKey(listOf("a", "b", "c"), "b", 1))
+        assertEquals(listOf("a", "b", "c"), moveAppKey(listOf("a", "b", "c"), "a", -1))
+    }
+
+    @Test
     fun releaseBadgeDistinguishesUpcomingAndReleasedTitles() {
         val today = LocalDate.of(2026, 8, 18)
         assertTrue(releaseLabel("2026-09-04", today).startsWith("◷ COMING"))

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.RecognizerIntent
@@ -168,6 +169,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
         var settingsOpen by remember { mutableStateOf(false) }
+        var appManagerOpen by remember { mutableStateOf(false) }
         var theater by remember { mutableStateOf<TheaterFeature?>(null) }
         var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
@@ -180,6 +182,16 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             mutableStateOf(preferences.getInt("idleMinutes", 3).takeIf { it in THEATER_IDLE_OPTIONS } ?: 3)
         }
         var compactApps by remember { mutableStateOf(preferences.getBoolean("compactApps", false)) }
+        var appOrder by remember {
+            mutableStateOf(preferences.getString("appOrder", "").orEmpty().split(',').filter(String::isNotBlank))
+        }
+        var hiddenApps by remember {
+            mutableStateOf(preferences.getStringSet("hiddenApps", emptySet()).orEmpty().toSet())
+        }
+        val orderedApps = remember(apps, appOrder) { orderLauncherApps(apps, appOrder) }
+        val visibleApps = remember(orderedApps, hiddenApps) {
+            orderedApps.filterNot { launcherAppKey(it) in hiddenApps }
+        }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
             theaterOpen = false
@@ -241,7 +253,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             } else {
                 Home(
                     catalog,
-                    apps = apps,
+                    apps = visibleApps,
                     compactApps = compactApps,
                     onLaunch = { app ->
                         runCatching {
@@ -252,6 +264,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     },
                     onSearch = { searching = true },
                     onSettings = { settingsOpen = true },
+                    onManageApps = { appManagerOpen = true },
                     onSelect = { selected = it },
                 )
                 if (searching) {
@@ -282,6 +295,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
                     compactApps = compactApps,
+                    hiddenAppCount = orderedApps.count { launcherAppKey(it) in hiddenApps },
                     onTheaterEnabled = {
                         theaterEnabled = it
                         preferences.edit().putBoolean("theaterEnabled", it).apply()
@@ -294,12 +308,35 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         compactApps = it
                         preferences.edit().putBoolean("compactApps", it).apply()
                     },
+                    onManageApps = {
+                        settingsOpen = false
+                        appManagerOpen = true
+                    },
                     onSystemSettings = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) },
                     onHomeSettings = {
                         runCatching { context.startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
                             .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
                     },
                     onDismiss = { settingsOpen = false },
+                )
+                if (appManagerOpen) AppManagerDialog(
+                    apps = orderedApps,
+                    hiddenApps = hiddenApps,
+                    onMove = { app, offset ->
+                        appOrder = moveAppKey(orderedApps.map(::launcherAppKey), launcherAppKey(app), offset)
+                        preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
+                    },
+                    onToggleHidden = { app ->
+                        val key = launcherAppKey(app)
+                        hiddenApps = if (key in hiddenApps) hiddenApps - key else hiddenApps + key
+                        preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
+                    },
+                    onAppInfo = { app ->
+                        context.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.component.packageName}")),
+                        )
+                    },
+                    onDismiss = { appManagerOpen = false },
                 )
             }
         }
@@ -317,6 +354,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 selected = null
                 searching = false
                 settingsOpen = false
+                appManagerOpen = false
                 recentTheater = (recentTheater + mediaKey(it.item)).takeLast(10)
             }
         }
@@ -352,6 +390,24 @@ private fun installedTvApps(context: Context): List<LauncherApp> {
             )
         }
         .sortedBy { it.name.lowercase() }
+}
+
+private fun launcherAppKey(app: LauncherApp) = app.component.flattenToShortString()
+
+private fun orderLauncherApps(apps: List<LauncherApp>, savedOrder: List<String>): List<LauncherApp> {
+    val byKey = apps.associateBy(::launcherAppKey)
+    return orderedAppKeys(byKey.keys.toList(), savedOrder).mapNotNull(byKey::get)
+}
+
+internal fun orderedAppKeys(installed: List<String>, saved: List<String>) =
+    saved.filter { it in installed }.distinct() + installed.filterNot { it in saved }
+
+internal fun moveAppKey(order: List<String>, key: String, offset: Int): List<String> {
+    val from = order.indexOf(key)
+    if (from < 0) return order
+    val to = (from + offset).coerceIn(order.indices)
+    if (from == to) return order
+    return order.toMutableList().apply { add(to, removeAt(from)) }
 }
 
 internal fun nextDiscoveryItem(items: List<MediaItem>, recent: List<String>): MediaItem? {
@@ -614,6 +670,7 @@ private fun Home(
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    onManageApps: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -649,7 +706,7 @@ private fun Home(
                     Modifier.focusRequester(heroFocus).focusProperties { up = searchFocus },
                 )
             }
-            item { AppDock(apps, heroFocus, compactApps, onLaunch) }
+            item { AppDock(apps, heroFocus, compactApps, onLaunch, onManageApps) }
             sections.forEach { section -> item(key = section.title) { MediaRow(section, onSelect) } }
             item {
                 Text(
@@ -719,21 +776,23 @@ private fun AppDock(
     upFocus: FocusRequester,
     compact: Boolean,
     onLaunch: (LauncherApp) -> Unit,
+    onManageApps: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 48.dp).clip(RoundedCornerShape(26.dp))
             .background(Color.White.copy(alpha = .045f))
             .border(1.dp, Color.White.copy(alpha = .10f), RoundedCornerShape(26.dp)),
     ) {
-        Text(
-            "Apps",
-            color = Color.White.copy(alpha = .86f),
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 24.dp, top = 17.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 24.dp, top = 10.dp, end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Apps", color = Color.White.copy(alpha = .86f), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            HeaderAction("Organize", "↔", onManageApps, Modifier.focusProperties { up = upFocus })
+        }
         if (apps.isEmpty()) {
-            Text("No TV apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.padding(24.dp))
+            Text("No apps on Home · choose Organize to restore hidden apps", color = Color.White.copy(alpha = .55f), modifier = Modifier.padding(24.dp))
         } else {
             LazyRow(
                 contentPadding = PaddingValues(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 18.dp),
@@ -784,13 +843,76 @@ private fun AppCard(app: LauncherApp, compact: Boolean, onLaunch: (LauncherApp) 
 }
 
 @Composable
+private fun AppManagerDialog(
+    apps: List<LauncherApp>,
+    hiddenApps: Set<String>,
+    onMove: (LauncherApp, Int) -> Unit,
+    onToggleHidden: (LauncherApp) -> Unit,
+    onAppInfo: (LauncherApp) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val first = remember { FocusRequester() }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        LaunchedEffect(Unit) {
+            delay(250)
+            first.requestFocus()
+        }
+        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.width(920.dp).height(620.dp).clip(RoundedCornerShape(28.dp))
+                    .background(Brush.verticalGradient(listOf(Color(0xFF242433), Color(0xFF11111A))))
+                    .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(28.dp)).padding(28.dp),
+            ) {
+                Text("Organize apps", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text("Move the Home shelf, hide clutter, or open Android app settings", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
+                Spacer(Modifier.height(20.dp))
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }) { index, app ->
+                        val hidden = launcherAppKey(app) in hiddenApps
+                        Row(
+                            Modifier.fillMaxWidth().animateItem().clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = if (hidden) .035f else .075f)).padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            AsyncImage(app.icon, app.name, Modifier.size(48.dp), contentScale = ContentScale.Fit)
+                            Column(Modifier.weight(1f)) {
+                                Text(app.name, color = Color.White.copy(alpha = if (hidden) .48f else .92f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                Text(if (hidden) "Hidden from Home" else "Position ${index + 1}", color = Color.White.copy(alpha = .42f), fontSize = 11.sp)
+                            }
+                            ActionButton(
+                                "Left",
+                                modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
+                                glyph = "‹",
+                            ) { onMove(app, -1) }
+                            ActionButton("Right", glyph = "›") { onMove(app, 1) }
+                            ActionButton(
+                                if (hidden) "Show" else "Hide",
+                                glyph = if (hidden) "+" else "−",
+                            ) { onToggleHidden(app) }
+                            ActionButton("Info", glyph = "ⓘ") { onAppInfo(app) }
+                        }
+                    }
+                }
+                if (apps.isEmpty()) Text("No launchable apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, glyph = "✓", onClick = onDismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsDialog(
     theaterEnabled: Boolean,
     idleMinutes: Int,
     compactApps: Boolean,
+    hiddenAppCount: Int,
     onTheaterEnabled: (Boolean) -> Unit,
     onIdleMinutes: (Int) -> Unit,
     onCompactApps: (Boolean) -> Unit,
+    onManageApps: () -> Unit,
     onSystemSettings: () -> Unit,
     onHomeSettings: () -> Unit,
     onDismiss: () -> Unit,
@@ -812,8 +934,11 @@ private fun SettingsDialog(
                 Spacer(Modifier.height(28.dp))
                 Text("APP SHELF", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Spacer(Modifier.height(10.dp))
-                ActionButton(if (compactApps) "Compact apps" else "Comfortable apps", glyph = "▦") {
-                    onCompactApps(!compactApps)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ActionButton(if (compactApps) "Compact apps" else "Comfortable apps", glyph = "▦") {
+                        onCompactApps(!compactApps)
+                    }
+                    ActionButton("Organize${if (hiddenAppCount > 0) " · $hiddenAppCount hidden" else ""}", glyph = "↔", onClick = onManageApps)
                 }
                 Spacer(Modifier.height(24.dp))
                 Text("THEATER", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)

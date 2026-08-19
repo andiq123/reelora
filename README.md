@@ -18,7 +18,7 @@ Reelora combines a simple Apple TV-inspired app launcher with fresh movie discov
 
 ## Highlights
 
-- Native installed-app discovery and one-click launching
+- Native installed-app discovery, one-click launching, and a local organizer for moving or hiding apps
 - Optional Android home-screen role with a shortcut to choose the default launcher
 - Smooth directional navigation with clear, stable TV focus states
 - Current cinema releases, new movies, upcoming titles, and weekly trends
@@ -30,7 +30,7 @@ Reelora combines a simple Apple TV-inspired app launcher with fresh movie discov
 
 ## A clean home flow
 
-Apps come first, followed by a rotating current title and four concise discovery rows. Settings control theater mode, idle timing, Android settings, and the default home app without cluttering the launcher.
+A rotating current title sits above the customizable app shelf, followed by four concise discovery rows. Settings control app organization, theater timing, Android settings, and the default home app without cluttering the launcher.
 
 ## Install
 
