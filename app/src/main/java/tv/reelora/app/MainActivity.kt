@@ -25,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -143,10 +144,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 
-private val Background = Color(0xFF07070F)
-private val Surface = Color(0xFF151522)
-private val Violet = Color(0xFFA978FF)
-private val Coral = Color(0xFFFF8064)
+private val Background = Color(0xFF080A0F)
+private val Surface = Color(0xFF171A22)
+private val Violet = Color(0xFF8DA2FF)
+private val Coral = Color(0xFFFFB56B)
+private val PanelBrush = Brush.verticalGradient(listOf(Color(0xF21D2029), Color(0xF20F1117)))
+private val DialogShape = RoundedCornerShape(28.dp)
+private val ControlShape = RoundedCornerShape(14.dp)
+private val Gap = 12.dp
+private val GapLarge = 24.dp
+private val DialogPadding = 28.dp
 
 private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
 @Immutable
@@ -989,7 +996,7 @@ private fun ShelfActionCard(
     ) {
         Box(
             Modifier.width(width).height(height).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF343048), Color(0xFF1B1A28))))
+                .background(PanelBrush)
                 .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = .12f), RoundedCornerShape(if (compact) 16.dp else 19.dp)),
             contentAlignment = Alignment.Center,
         ) {
@@ -1036,12 +1043,7 @@ private fun AppCard(
     } else 0f
     val tileWidth = if (compact) 116.dp else 136.dp
     val tileHeight = if (compact) 68.dp else 78.dp
-    val tileHue = remember(app.component.packageName) { (app.component.packageName.hashCode() and 0x7fffffff) % 360f }
-    val tileBackground = remember(tileHue) {
-        Brush.linearGradient(
-            listOf(Color.hsv(tileHue, .55f, .38f), Color.hsv((tileHue + 32f) % 360f, .62f, .22f)),
-        )
-    }
+    val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
     Column(
         modifier.width(tileWidth)
             .graphicsLayer {
@@ -1134,6 +1136,116 @@ private fun AppCard(
 }
 
 @Composable
+private fun TvDialog(
+    onDismiss: () -> Unit,
+    modifier: Modifier,
+    ambient: Boolean = true,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.(() -> Unit) -> Unit,
+) {
+    var visible by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val close = {
+        if (!closing) {
+            closing = true
+            visible = false
+            scope.launch {
+                delay(130)
+                onDismiss()
+            }
+        }
+    }
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
+            if (ambient) AmbientBackdrop()
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(tween(150)) + scaleIn(
+                    initialScale = .975f,
+                    animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
+                ),
+                exit = fadeOut(tween(110)) + scaleOut(targetScale = .985f, animationSpec = tween(110)),
+                label = "dialog surface",
+            ) {
+                Box(
+                    modifier.clip(DialogShape).background(PanelBrush)
+                        .border(1.dp, Color.White.copy(alpha = .12f), DialogShape),
+                ) { content(close) }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { visible = true }
+}
+
+@Composable
+private fun DialogHeader(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    leading: (@Composable () -> Unit)? = null,
+    action: (@Composable () -> Unit)? = null,
+) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GapLarge)) {
+        leading?.invoke()
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = Color.White.copy(alpha = .52f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        action?.invoke()
+    }
+}
+
+@Composable
+private fun SettingsPanel(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = .055f))
+            .border(1.dp, Color.White.copy(alpha = .07f), RoundedCornerShape(20.dp)).padding(20.dp),
+    ) {
+        Text(title, color = Violet, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
+        Text(subtitle, color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
+        Spacer(Modifier.height(Gap))
+        content()
+    }
+}
+
+@Composable
+private fun TvTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    imeAction: ImeAction = ImeAction.Done,
+) {
+    var focused by remember { mutableStateOf(false) }
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 20.sp),
+        cursorBrush = SolidColor(Violet),
+        keyboardOptions = KeyboardOptions(imeAction = imeAction),
+        modifier = modifier.onFocusChanged { focused = it.isFocused },
+        decorationBox = { field ->
+            Row(
+                Modifier.fillMaxWidth().height(60.dp).clip(ControlShape)
+                    .background(Color.White.copy(alpha = if (focused) .1f else .055f))
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .1f), ControlShape)
+                    .padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (value.isEmpty()) Text(placeholder, color = Color.White.copy(alpha = .4f), fontSize = 20.sp)
+                field()
+            }
+        },
+    )
+}
+
+@Composable
 private fun AppOptionsDialog(
     app: LauncherApp,
     onMove: () -> Unit,
@@ -1143,36 +1255,25 @@ private fun AppOptionsDialog(
     onDismiss: () -> Unit,
 ) {
     val first = remember { FocusRequester() }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        LaunchedEffect(Unit) {
-            delay(160)
-            first.requestFocus()
-        }
-        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
-            Column(
-                Modifier.width(700.dp).clip(RoundedCornerShape(26.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xFF252534), Color(0xFF12121B))))
-                    .border(1.dp, Color.White.copy(alpha = .14f), RoundedCornerShape(26.dp)).padding(28.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    AsyncImage(app.icon, app.name, Modifier.size(58.dp), contentScale = ContentScale.Fit)
-                    Column {
-                        Text(app.name, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("App options", color = Color.White.copy(alpha = .5f), fontSize = 13.sp)
-                    }
-                }
-                Spacer(Modifier.height(22.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    LaunchedEffect(Unit) { delay(160); first.requestFocus() }
+    TvDialog(onDismiss, Modifier.width(760.dp)) { close ->
+        Column(Modifier.padding(DialogPadding)) {
+            DialogHeader(
+                app.name,
+                "App options",
+                leading = { AsyncImage(app.icon, app.name, Modifier.size(56.dp), contentScale = ContentScale.Fit) },
+            )
+                Spacer(Modifier.height(GapLarge))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Gap)) {
                     AppOptionTile("Move", "Reorder on Home", Icons.AutoMirrored.Filled.List, Modifier.weight(1f).focusRequester(first), onMove)
                     AppOptionTile("Rename", "Shelf label", Icons.Default.Edit, Modifier.weight(1f), onRename)
                     AppOptionTile("App info", "Manage or uninstall", Icons.Default.Info, Modifier.weight(1f), onAppInfo)
                     AppOptionTile("Hide", "Remove from Home", Icons.Default.Delete, Modifier.weight(1f), onHide)
                 }
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Close", icon = Icons.Default.Close, onClick = onDismiss)
+                    ActionButton("Close", icon = Icons.Default.Close, onClick = close)
                 }
-            }
         }
     }
 }
@@ -1191,19 +1292,19 @@ private fun AppOptionTile(
         modifier.graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(18.dp))
-            .background(if (focused) Color.White else Color.White.copy(alpha = .06f))
-            .border(1.dp, if (focused) Color.White else Color.White.copy(alpha = .1f), RoundedCornerShape(18.dp))
+            .background(if (focused) Violet.copy(alpha = .18f) else Color.White.copy(alpha = .055f))
+            .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .09f), RoundedCornerShape(18.dp))
             .clickable(role = Role.Button, onClick = onClick).padding(18.dp),
     ) {
         Image(
             imageVector = icon,
             contentDescription = null,
-            colorFilter = ColorFilter.tint(if (focused) Coral else Color.White.copy(alpha = .74f)),
+            colorFilter = ColorFilter.tint(if (focused) Color.White else Color.White.copy(alpha = .68f)),
             modifier = Modifier.size(27.dp),
         )
         Spacer(Modifier.height(14.dp))
-        Text(title, color = if (focused) Background else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(subtitle, color = if (focused) Background.copy(alpha = .62f) else Color.White.copy(alpha = .44f), fontSize = 11.sp, maxLines = 1)
+        Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(subtitle, color = Color.White.copy(alpha = if (focused) .68f else .44f), fontSize = 11.sp, maxLines = 1)
     }
 }
 
@@ -1215,56 +1316,31 @@ private fun AppRenameDialog(
     onDismiss: () -> Unit,
 ) {
     var name by remember(app) { mutableStateOf(app.name) }
-    var fieldFocused by remember { mutableStateOf(false) }
     val fieldFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        LaunchedEffect(Unit) {
-            delay(180)
-            fieldFocus.requestFocus()
-            keyboard?.show()
-        }
-        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .88f)), contentAlignment = Alignment.Center) {
-            Column(
-                Modifier.width(620.dp).clip(RoundedCornerShape(26.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xFF272636), Color(0xFF14131D))))
-                    .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp)).padding(28.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    AsyncImage(app.icon, null, Modifier.size(58.dp), contentScale = ContentScale.Fit)
-                    Column {
-                        Text("Rename app", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        Text("Rename on the Reelora shelf", color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
-                    }
-                }
-                Spacer(Modifier.height(22.dp))
-                BasicTextField(
+    LaunchedEffect(Unit) { delay(180); fieldFocus.requestFocus(); keyboard?.show() }
+    TvDialog(onDismiss, Modifier.width(640.dp)) { close ->
+        Column(Modifier.padding(DialogPadding)) {
+            DialogHeader(
+                "Rename app",
+                "Change the name shown on Home",
+                leading = { AsyncImage(app.icon, null, Modifier.size(56.dp), contentScale = ContentScale.Fit) },
+            )
+                Spacer(Modifier.height(GapLarge))
+                TvTextField(
                     value = name,
                     onValueChange = { name = it.take(40) },
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 20.sp),
-                    cursorBrush = SolidColor(Coral),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus).onFocusChanged { fieldFocused = it.isFocused },
-                    decorationBox = { field ->
-                        Box(
-                            Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = .07f))
-                                .border(if (fieldFocused) 2.dp else 1.dp, if (fieldFocused) Violet else Color.White.copy(alpha = .14f), RoundedCornerShape(14.dp))
-                                .padding(horizontal = 18.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) { field() }
-                    },
+                    placeholder = "App name",
+                    modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                 )
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     ActionButton("Reset", icon = Icons.Default.Refresh, onClick = onReset)
-                    Spacer(Modifier.width(10.dp))
-                    ActionButton("Cancel", icon = Icons.Default.Close, onClick = onDismiss)
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Gap))
+                    ActionButton("Cancel", icon = Icons.Default.Close, onClick = close)
+                    Spacer(Modifier.width(Gap))
                     ActionButton("Save", icon = Icons.Default.Check) { name.trim().takeIf(String::isNotEmpty)?.let(onSave) }
                 }
-            }
         }
     }
 }
@@ -1279,21 +1355,12 @@ private fun AppManagerDialog(
     onDismiss: () -> Unit,
 ) {
     val first = remember { FocusRequester() }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        LaunchedEffect(Unit) {
-            delay(250)
-            first.requestFocus()
-        }
-        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
-            Column(
-                Modifier.width(920.dp).height(620.dp).clip(RoundedCornerShape(28.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xFF242433), Color(0xFF11111A))))
-                    .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(28.dp)).padding(28.dp),
-            ) {
-                Text("Organize apps", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                Text("Move the Home shelf, hide clutter, or open Android app settings", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
-                Spacer(Modifier.height(20.dp))
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    LaunchedEffect(Unit) { delay(180); first.requestFocus() }
+    TvDialog(onDismiss, Modifier.width(960.dp).height(640.dp)) { close ->
+        Column(Modifier.padding(DialogPadding)) {
+                DialogHeader("Organize apps", "Move, hide, or inspect installed applications")
+                Spacer(Modifier.height(GapLarge))
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Gap)) {
                     itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }) { index, app ->
                         val hidden = launcherAppKey(app) in hiddenApps
                         Row(
@@ -1323,9 +1390,8 @@ private fun AppManagerDialog(
                 }
                 if (apps.isEmpty()) Text("No launchable apps found", color = Color.White.copy(alpha = .55f), modifier = Modifier.weight(1f))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, icon = Icons.Default.Check, onClick = onDismiss)
+                    ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, icon = Icons.Default.Check, onClick = close)
                 }
-            }
         }
     }
 }
@@ -1346,50 +1412,28 @@ private fun SettingsDialog(
     onDismiss: () -> Unit,
 ) {
     val first = remember { FocusRequester() }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        LaunchedEffect(Unit) {
-            delay(350)
-            first.requestFocus()
-        }
-        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .88f)), contentAlignment = Alignment.Center) {
-            Column(
-                Modifier.width(840.dp).clip(RoundedCornerShape(28.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xFF242433), Color(0xFF12121B))))
-                    .border(1.dp, Color.White.copy(alpha = .14f), RoundedCornerShape(28.dp)).padding(28.dp),
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Settings", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                        Text("A quiet home for apps and discovery", color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
-                    }
-                    ActionButton("Done", icon = Icons.Default.Check, onClick = onDismiss)
-                }
-                Spacer(Modifier.height(20.dp))
+    LaunchedEffect(Unit) { delay(180); first.requestFocus() }
+    TvDialog(onDismiss, Modifier.width(880.dp)) { close ->
+        Column(Modifier.padding(DialogPadding)) {
+                DialogHeader(
+                    "Settings",
+                    "A quiet home for apps and discovery",
+                    action = { ActionButton("Done", icon = Icons.Default.Check, onClick = close) },
+                )
+                Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column(
-                        Modifier.weight(1f).clip(RoundedCornerShape(20.dp))
-                            .background(Color.White.copy(alpha = .055f)).padding(18.dp),
-                    ) {
-                        Text("APP SHELF", color = Coral, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("Find, arrange and size your Home apps", color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
-                        Spacer(Modifier.height(14.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsPanel("APP SHELF", "Find, arrange and size Home apps", Modifier.weight(1f)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                             ActionButton("Search", modifier = Modifier.focusRequester(first), icon = Icons.Default.Search, onClick = onSearch)
                             ActionButton("Organize${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", icon = Icons.AutoMirrored.Filled.List, onClick = onManageApps)
                         }
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(Gap))
                         ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", icon = Icons.AutoMirrored.Filled.List) {
                             onCompactApps(!compactApps)
                         }
                     }
-                    Column(
-                        Modifier.weight(1f).clip(RoundedCornerShape(20.dp))
-                            .background(Color.White.copy(alpha = .055f)).padding(18.dp),
-                    ) {
-                        Text("THEATER", color = Coral, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("Play trailers when the launcher rests", color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
-                        Spacer(Modifier.height(14.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsPanel("THEATER", "Play trailers when the launcher rests", Modifier.weight(1f)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                             ActionButton(if (theaterEnabled) "On" else "Off", icon = if (theaterEnabled) Icons.Default.PlayArrow else Icons.Default.Close) {
                                 onTheaterEnabled(!theaterEnabled)
                             }
@@ -1397,26 +1441,17 @@ private fun SettingsDialog(
                                 onIdleMinutes(nextTheaterIdleMinutes(idleMinutes))
                             }
                         }
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(Gap))
                         Text("Pauses while another app is open", color = Color.White.copy(alpha = .38f), fontSize = 11.sp)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                        .background(Color.White.copy(alpha = .045f)).padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("SYSTEM", color = Coral, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("Home and Android controls", color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SettingsPanel("SYSTEM", "Home and Android controls", Modifier.fillMaxWidth()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                         ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
                         ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
                     }
                 }
-            }
         }
     }
 }
@@ -1427,11 +1462,9 @@ private fun SearchDialog(
     onDismiss: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
-    var entered by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<MediaItem>()) }
     var loading by remember { mutableStateOf(false) }
-    var inputFocused by remember { mutableStateOf(false) }
     val inputRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
@@ -1448,7 +1481,6 @@ private fun SearchDialog(
     }
 
     LaunchedEffect(Unit) {
-        entered = true
         delay(120)
         inputRequester.requestFocus()
         keyboard?.show()
@@ -1466,65 +1498,21 @@ private fun SearchDialog(
         loading = false
     }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .94f)), contentAlignment = Alignment.Center) {
-          AmbientBackdrop()
-          AnimatedVisibility(
-            visible = entered,
-            enter = fadeIn(tween(180)) + scaleIn(
-                initialScale = .965f,
-                animationSpec = spring(dampingRatio = .84f, stiffness = Spring.StiffnessMediumLow),
-            ),
-            label = "search dialog",
-          ) {
-           Column(
-             Modifier
-                .fillMaxWidth(.92f)
-                .fillMaxHeight(.88f)
-                .clip(RoundedCornerShape(26.dp))
-                .background(Brush.verticalGradient(listOf(Color(0xF21B1B2B), Color(0xF20D0D16))))
-                .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp))
-                .padding(30.dp),
-           ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Search", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                    Text("Movies, series and animation", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
-                }
-                ActionButton("Close", icon = Icons.Default.Close, onClick = onDismiss)
-            }
-            Spacer(Modifier.height(22.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BasicTextField(
+    TvDialog(onDismiss, Modifier.fillMaxWidth(.92f).fillMaxHeight(.74f)) { close ->
+        Column(Modifier.padding(DialogPadding)) {
+            DialogHeader(
+                "Search",
+                "Movies, series and animation",
+                action = { ActionButton("Close", icon = Icons.Default.Close, onClick = close) },
+            )
+            Spacer(Modifier.height(GapLarge))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                TvTextField(
                     value = query,
                     onValueChange = { query = it.take(80) },
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 21.sp),
-                    cursorBrush = SolidColor(Coral),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(inputRequester)
-                        .onFocusChanged { inputFocused = it.isFocused },
-                    decorationBox = { field ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(62.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = .07f))
-                                .border(
-                                    if (inputFocused) 2.dp else 1.dp,
-                                    if (inputFocused) Violet else Color.White.copy(alpha = .16f),
-                                    RoundedCornerShape(14.dp),
-                                )
-                                .padding(horizontal = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (query.isEmpty()) Text("Type a title…", color = Color.White.copy(alpha = .42f), fontSize = 21.sp)
-                            field()
-                        }
-                    },
+                    placeholder = "Type a title…",
+                    imeAction = ImeAction.Search,
+                    modifier = Modifier.weight(1f).focusRequester(inputRequester),
                 )
                 if (voiceAvailable) ActionButton("Voice") { voice.launch(voiceIntent) }
             }
@@ -1545,21 +1533,8 @@ private fun SearchDialog(
             if (loading) {
                 LoadingPosterRow()
             } else {
-                LazyRow(
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.focusGroup(),
-                ) {
-                    items(shown, key = { "${it.mediaType}-${it.id}" }) { item ->
-                        PosterCard(item, onSelect = {
-                            keyboard?.hide()
-                            onSelect(item)
-                        })
-                    }
-                }
+                PosterStrip(shown, onSelect = { keyboard?.hide(); onSelect(it) })
             }
-           }
-          }
         }
     }
 }
@@ -1649,17 +1624,31 @@ private fun MediaRow(
     Column {
         Text(section.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
         Spacer(Modifier.height(12.dp))
-        LazyRow(
+        PosterStrip(
+            section.items,
+            onSelect,
+            modifier = Modifier.height(132.dp),
             contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.height(132.dp).focusGroup(),
-        ) {
-            itemsIndexed(section.items, key = { _, item -> "${section.title}-${item.id}" }) { index, item ->
-                val focusModifier = if (index == 0 && firstFocus != null) {
-                    Modifier.focusRequester(firstFocus).focusProperties { upFocus?.let { up = it } }
-                } else Modifier
-                PosterCard(item, onSelect, focusModifier)
-            }
+            firstModifier = if (firstFocus != null) Modifier.focusRequester(firstFocus).focusProperties { upFocus?.let { up = it } } else Modifier,
+        )
+    }
+}
+
+@Composable
+private fun PosterStrip(
+    items: List<MediaItem>,
+    onSelect: (MediaItem) -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(start = 8.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
+    firstModifier: Modifier = Modifier,
+) {
+    LazyRow(
+        contentPadding = contentPadding,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = modifier.focusGroup(),
+    ) {
+        itemsIndexed(items, key = { _, item -> mediaKey(item) }) { index, item ->
+            PosterCard(item, onSelect, if (index == 0) firstModifier else Modifier)
         }
     }
 }
@@ -1722,28 +1711,30 @@ private fun ActionButton(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.035f else 1f, tween(95), label = "$text button focus")
     Box(
         modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (focused) Color.White else Color.White.copy(alpha = .085f))
-            .border(1.dp, if (focused) Color.White else Color.White.copy(alpha = .09f), RoundedCornerShape(10.dp))
+            .clip(ControlShape)
+            .background(if (focused) Violet.copy(alpha = .22f) else Color.White.copy(alpha = .07f))
+            .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .09f), ControlShape)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 11.dp)
+            .padding(horizontal = 20.dp, vertical = 11.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             icon?.let {
                 Image(
                     imageVector = it,
                     contentDescription = null,
-                    colorFilter = ColorFilter.tint(if (focused) Coral else Color.White),
+                    colorFilter = ColorFilter.tint(if (focused) Color.White else Color.White.copy(alpha = .78f)),
                     modifier = Modifier.size(18.dp),
                 )
             }
-            Text(text, color = if (focused) Background else Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text(text, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
     }
 }
@@ -1756,7 +1747,6 @@ private fun DetailsDialog(
     onSelect: (MediaItem) -> Unit,
     onPlayTrailer: (Trailer) -> Unit,
 ) {
-    var entered by remember(item.id) { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -1769,14 +1759,7 @@ private fun DetailsDialog(
     val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: item.backdropUrl
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
     val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-      Box(Modifier.fillMaxSize().background(Background), contentAlignment = Alignment.Center) {
-        AnimatedVisibility(
-          visible = entered,
-          enter = fadeIn(tween(140)),
-          modifier = Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f),
-          label = "details dialog",
-        ) {
+    TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f), ambient = false) { close ->
          Box(Modifier.fillMaxSize()) {
           Box(
               Modifier.fillMaxSize().clip(RoundedCornerShape(26.dp)).background(Color(0xFF11111C)),
@@ -1808,7 +1791,7 @@ private fun DetailsDialog(
                         modifier = Modifier.focusRequester(requester),
                         onFocused = restoreTop,
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        onClick = onDismiss,
+                        onClick = close,
                     )
                     details?.trailer?.let { trailer ->
                         ActionButton("Play trailer", onFocused = restoreTop, icon = Icons.Default.PlayArrow) { onPlayTrailer(trailer) }
@@ -1874,49 +1857,19 @@ private fun DetailsDialog(
                     when {
                         titles == null -> LoadingPosterRow()
                         titles.isEmpty() -> Text("No other titles found", color = Color.White.copy(alpha = .55f), fontSize = 14.sp)
-                        else -> LazyRow(
-                            contentPadding = PaddingValues(8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.focusGroup(),
-                        ) {
-                            itemsIndexed(titles, key = { _, title -> "actor-${actor.id}-${title.mediaType}-${title.id}" }) { index, title ->
-                                PosterCard(
-                                    title,
-                                    onSelect = onSelect,
-                                    modifier = if (index == 0) Modifier.focusRequester(actorRowRequester) else Modifier,
-                                )
-                            }
-                        }
+                        else -> PosterStrip(titles, onSelect, firstModifier = Modifier.focusRequester(actorRowRequester))
                     }
                 } }
             }
             item { Column {
                 Text("More like this", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.focusGroup(),
-                ) {
-                    itemsIndexed(moreLike, key = { _, suggestion -> suggestion.id }) { index, suggestion ->
-                        PosterCard(
-                            suggestion,
-                            onSelect,
-                            modifier = if (index == 0) Modifier.focusRequester(similarRowRequester) else Modifier,
-                        )
-                    }
-                }
+                PosterStrip(moreLike, onSelect, firstModifier = Modifier.focusRequester(similarRowRequester))
             } }
           }
-          Box(
-              Modifier.fillMaxSize().border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(26.dp)),
-          )
          }
-        }
-      }
     }
     LaunchedEffect(item.id) {
-        entered = true
         listState.scrollToItem(0)
         delay(140)
         requester.requestFocus()
@@ -1984,7 +1937,7 @@ private fun CastRow(
         return
     }
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(start = 6.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.focusGroup(),
     ) {
