@@ -462,7 +462,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         LaunchedEffect(result, theater, theaterEnabled, idleMinutes, isForeground) {
             val catalog = result ?: return@LaunchedEffect
             if (theater != null || !theaterEnabled || !isForeground) return@LaunchedEffect
-            while (withTimeoutOrNull(idleMinutes * 60_000L) { inputEvents.receive() } != null) Unit
+            while (withTimeoutOrNull(idleMinutes * 60_000L) { inputEvents.receive() } != null) {}
             findTheaterFeature(
                 launcherMovieSections(catalog).flatMap { it.items },
                 recentTheater,
@@ -796,10 +796,10 @@ private fun Home(
     val appListState = rememberLazyListState()
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
+    val lastAppRowFocus = remember { arrayOf<FocusRequester?>(null) }
     val firstMovieFocus = remember { FocusRequester() }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
     val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
-    var lastFocusedAppKey by remember(installedAppKeys) { mutableStateOf(apps.firstOrNull()?.let(::launcherAppKey)) }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
@@ -848,7 +848,7 @@ private fun Home(
                         Modifier
                             .onPreviewKeyEvent { event ->
                                 if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                                    appFocus.requestFocus()
+                                    (lastAppRowFocus[0] ?: appFocus).requestFocus()
                                     true
                                 } else false
                             }
@@ -858,8 +858,7 @@ private fun Home(
                     AppDock(
                         apps, appListState, heroFocus, appFocus, firstMovieFocus, compactApps,
                         onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onManageApps, onSettings,
-                        lastFocusedAppKey = lastFocusedAppKey,
-                        onAppFocused = { lastFocusedAppKey = launcherAppKey(it) },
+                        onRowFocused = { lastAppRowFocus[0] = it },
                     )
                 }
             }
@@ -896,27 +895,27 @@ private fun AppDock(
     onMoveDone: () -> Unit,
     onManageApps: () -> Unit,
     onSettings: () -> Unit,
-    lastFocusedAppKey: String?,
-    onAppFocused: (LauncherApp) -> Unit,
+    onRowFocused: (FocusRequester) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val showStartFade by remember {
-        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+        derivedStateOf { listState.firstVisibleItemIndex > 0 }
     }
     val showEndFade by remember {
-        derivedStateOf {
-            val layout = listState.layoutInfo
-            layout.visibleItemsInfo.lastOrNull()?.index?.let { it < layout.totalItemsCount - 1 } == true
-        }
+        derivedStateOf { listState.canScrollForward }
     }
-    Box(Modifier.fillMaxWidth().height(if (compact) 110.dp else 120.dp)) {
+    Box(
+        Modifier.fillMaxWidth().height(if (compact) 110.dp else 120.dp)
+            .padding(start = 48.dp, end = 96.dp),
+    ) {
         LazyRow(
             state = listState,
-            contentPadding = PaddingValues(start = 56.dp, end = 104.dp, top = 8.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(start = 8.dp, end = 32.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
             modifier = Modifier.fillMaxSize().focusGroup(),
         ) {
             itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
+                val itemFocus = if (index == 0) firstFocus else remember { FocusRequester() }
                 AppCard(
                     app,
                     compact,
@@ -933,20 +932,27 @@ private fun AppDock(
                         }
                     },
                     onMoveDone = onMoveDone,
-                    onFocused = { onAppFocused(app) },
+                    onFocused = { onRowFocused(itemFocus) },
                     modifier = Modifier.animateItem(fadeInSpec = null, placementSpec = tween(150), fadeOutSpec = null)
-                        .then(if (launcherAppKey(app) == lastFocusedAppKey || lastFocusedAppKey == null && index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                        .focusRequester(itemFocus)
                         .focusProperties { up = upFocus; down = downFocus },
                 )
             }
             item(key = "organize") {
+                val itemFocus = remember { FocusRequester() }
                 ShelfActionCard(
                     "Organize", Icons.AutoMirrored.Filled.List, compact, onManageApps,
-                    Modifier.focusProperties { up = upFocus; down = downFocus },
+                    Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
+                    onFocused = { onRowFocused(itemFocus) },
                 )
             }
             item(key = "settings") {
-                ShelfActionCard("Settings", Icons.Default.Settings, compact, onSettings, Modifier.focusProperties { up = upFocus; down = downFocus })
+                val itemFocus = remember { FocusRequester() }
+                ShelfActionCard(
+                    "Settings", Icons.Default.Settings, compact, onSettings,
+                    Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
+                    onFocused = { onRowFocused(itemFocus) },
+                )
             }
         }
         if (showStartFade) Box(
@@ -961,14 +967,24 @@ private fun AppDock(
 }
 
 @Composable
-private fun ShelfActionCard(label: String, icon: ImageVector, compact: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ShelfActionCard(
+    label: String,
+    icon: ImageVector,
+    compact: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "$label focus")
     val width = if (compact) 116.dp else 136.dp
     val height = if (compact) 68.dp else 78.dp
     Column(
         modifier.width(width).graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged { focused = it.isFocused }.clickable(role = Role.Button, onClick = onClick),
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }.clickable(role = Role.Button, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
