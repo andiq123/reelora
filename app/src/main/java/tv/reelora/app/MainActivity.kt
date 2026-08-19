@@ -236,18 +236,22 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             appOrder = moveAppKey(currentAppOrder(), launcherAppKey(app), offset)
             preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
         }
-        fun moveVisibleApp(app: LauncherApp, offset: Int) {
+        fun moveVisibleApp(app: LauncherApp, offset: Int): Int {
             val key = launcherAppKey(app)
             val fullOrder = currentAppOrder().toMutableList()
             val visibleKeys = fullOrder.filterNot { it in hiddenApps }
             val from = visibleKeys.indexOf(key)
-            val targetKey = visibleKeys.getOrNull(from + offset) ?: return
+            if (from < 0) return 0
+            val destination = (from + offset).coerceIn(visibleKeys.indices)
+            if (destination == from) return from
+            val targetKey = visibleKeys[destination]
             val target = fullOrder.indexOf(targetKey)
             val source = fullOrder.indexOf(key)
             fullOrder[source] = targetKey
             fullOrder[target] = key
             appOrder = fullOrder
             preferences.edit().putString("appOrder", appOrder.joinToString(",")).apply()
+            return destination
         }
         val theaterScope = rememberCoroutineScope()
         val theaterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
@@ -784,7 +788,7 @@ private fun Home(
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
     moveConfirmReady: Boolean,
-    onMoveApp: (LauncherApp, Int) -> Unit,
+    onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
@@ -888,7 +892,7 @@ private fun AppDock(
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
     moveConfirmReady: Boolean,
-    onMoveApp: (LauncherApp, Int) -> Unit,
+    onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
     onManageApps: () -> Unit,
     onSettings: () -> Unit,
@@ -908,7 +912,7 @@ private fun AppDock(
     Box(Modifier.fillMaxWidth().height(if (compact) 110.dp else 120.dp)) {
         LazyRow(
             state = listState,
-            contentPadding = PaddingValues(start = 56.dp, end = 84.dp, top = 8.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(start = 56.dp, end = 104.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
             modifier = Modifier.fillMaxSize().focusGroup(),
         ) {
@@ -922,11 +926,10 @@ private fun AppDock(
                     moveConfirmReady = moveConfirmReady,
                     movePosition = "${index + 1}/${apps.size}",
                     onMove = { offset ->
-                        val viewportStart = listState.firstVisibleItemIndex
-                        onMoveApp(app, offset)
+                        val destination = onMoveApp(app, offset)
                         scope.launch {
                             delay(16)
-                            listState.scrollToItem(viewportStart)
+                            listState.animateScrollToItem((destination - 2).coerceAtLeast(0))
                         }
                     },
                     onMoveDone = onMoveDone,
@@ -951,7 +954,7 @@ private fun AppDock(
                 .background(Brush.horizontalGradient(listOf(Background, Background, Background.copy(alpha = 0f)))),
         )
         if (showEndFade) Box(
-            Modifier.align(Alignment.CenterEnd).width(72.dp).fillMaxHeight()
+            Modifier.align(Alignment.CenterEnd).width(88.dp).fillMaxHeight()
                 .background(Brush.horizontalGradient(listOf(Background.copy(alpha = 0f), Background))),
         )
     }
