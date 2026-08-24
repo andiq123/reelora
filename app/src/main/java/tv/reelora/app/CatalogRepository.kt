@@ -101,6 +101,7 @@ object CatalogRepository {
     private val personCredits = ConcurrentHashMap<Int, List<MediaItem>>()
     private val mediaDetails = ConcurrentHashMap<String, MediaDetails>()
     val pageTitles = listOf("Discover", "In cinemas", "Movies", "TV series", "Animation")
+    val configured get() = BuildConfig.TMDB_TOKEN.isNotBlank()
 
     val specs = listOf(
         CatalogSpec(0, "Trending this week", "/trending/all/week", "movie"),
@@ -122,7 +123,7 @@ object CatalogRepository {
             val demo = fallback().sections
             CatalogResult(
                 pageTitles.indices.flatMap { page -> sections.filter { it.page == page }.ifEmpty { demo.filter { it.page == page } } },
-                sections.isEmpty(),
+                sections.size < specs.size,
             )
         }.getOrElse { fallback() }
     }

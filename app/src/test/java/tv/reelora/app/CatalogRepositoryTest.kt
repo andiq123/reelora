@@ -24,6 +24,9 @@ class CatalogRepositoryTest {
         assertEquals("☀", weatherSymbol(0))
         assertEquals("☂", weatherSymbol(61))
         assertEquals("❄", weatherSymbol(71))
+        assertEquals("◌  Weather", weatherStatusText(null, WeatherLoadState.Loading))
+        assertEquals("!  Weather", weatherStatusText(null, WeatherLoadState.Error))
+        assertEquals("☀  24°", weatherStatusText(WeatherNow(24, 0), WeatherLoadState.Ready))
     }
 
     @Test
@@ -98,6 +101,15 @@ class CatalogRepositoryTest {
 
         assertEquals(6, sections.size)
         assertEquals(keys.distinct(), keys)
+    }
+
+    @Test
+    fun verticalNavigationKeepsColumnAndClampsAtShorterRows() {
+        assertEquals(0, adjacentRowIndex(0, 6))
+        assertEquals(3, adjacentRowIndex(3, 6))
+        assertEquals(5, adjacentRowIndex(9, 6))
+        assertEquals(20_000L, nextCatalogRetryDelay(10_000L))
+        assertEquals(300_000L, nextCatalogRetryDelay(300_000L))
     }
 
     @Test

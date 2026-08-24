@@ -145,8 +145,21 @@ private val ControlShape = RoundedCornerShape(14.dp)
 private val Gap = 12.dp
 private val GapLarge = 24.dp
 private val DialogPadding = 28.dp
+private val RowBringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val margin = 24f
+        val end = offset + size
+        if (offset >= margin && end <= containerSize - margin) return 0f
+        return if (offset < margin) offset - margin else end - containerSize + margin
+    }
+}
+
+private fun Modifier.activeTransform(scale: Float, translationY: Float = 0f) =
+    if (scale == 1f && translationY == 0f) this
+    else graphicsLayer { scaleX = scale; scaleY = scale; this.translationY = translationY }
 
 private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
+internal enum class WeatherLoadState { Loading, Ready, Error }
 @Immutable
 private data class LauncherApp(
     val name: String,
@@ -215,12 +228,14 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             mutableStateOf(preferences.getInt("idleMinutes", 3).takeIf { it in THEATER_IDLE_OPTIONS } ?: 3)
         }
         var compactApps by remember { mutableStateOf(preferences.getBoolean("compactApps", false)) }
+        var focusLift by remember { mutableStateOf(preferences.getBoolean("focusLift", true)) }
         var weatherLocation by remember { mutableStateOf(preferences.getString("weatherLocation", "Chișinău").orEmpty()) }
         var weatherCelsius by remember { mutableStateOf(preferences.getBoolean("weatherCelsius", true)) }
         var weatherLatitude by remember { mutableStateOf(preferences.getString("weatherLatitude", null)?.toDoubleOrNull()) }
         var weatherLongitude by remember { mutableStateOf(preferences.getString("weatherLongitude", null)?.toDoubleOrNull()) }
         var use24HourClock by remember { mutableStateOf(preferences.getBoolean("use24HourClock", true)) }
         var weather by remember { mutableStateOf<WeatherNow?>(null) }
+        var weatherState by remember { mutableStateOf(WeatherLoadState.Loading) }
         var appOrder by remember {
             mutableStateOf(preferences.getString("appOrder", "").orEmpty().split(',').filter(String::isNotBlank))
         }
@@ -286,12 +301,25 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             }
         }
         LaunchedEffect(Unit) {
-            result = CatalogRepository.load()
+            var retryDelay = 10_000L
+            while (true) {
+                val loaded = CatalogRepository.load()
+                result = loaded
+                if (!loaded.isDemo || !CatalogRepository.configured) break
+                delay(retryDelay)
+                retryDelay = nextCatalogRetryDelay(retryDelay)
+            }
         }
         LaunchedEffect(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude) {
+            weather = null
+            weatherState = WeatherLoadState.Loading
             while (true) {
-                weather = WeatherRepository.current(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude)
-                delay(30 * 60_000L)
+                val latest = WeatherRepository.current(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude)
+                if (latest == null) weatherState = WeatherLoadState.Error else {
+                    weather = latest
+                    weatherState = WeatherLoadState.Ready
+                }
+                delay(if (latest == null) 60_000L else 30 * 60_000L)
             }
         }
         LaunchedEffect(isForeground) {
@@ -337,8 +365,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     catalog,
                     apps = visibleApps,
                     weather = weather,
+                    weatherState = weatherState,
                     use24HourClock = use24HourClock,
                     compactApps = compactApps,
+                    focusLift = focusLift,
                     onLaunch = ::launchApp,
                     onSearch = { searching = true },
                     onSettings = { settingsOpen = true },
@@ -378,6 +408,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
                     compactApps = compactApps,
+                    focusLift = focusLift,
                     weatherLocation = weatherLocation,
                     weatherCelsius = weatherCelsius,
                     use24HourClock = use24HourClock,
@@ -397,6 +428,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onCompactApps = {
                         compactApps = it
                         preferences.edit().putBoolean("compactApps", it).apply()
+                    },
+                    onFocusLift = {
+                        focusLift = it
+                        preferences.edit().putBoolean("focusLift", it).apply()
                     },
                     onWeatherLocation = {
                         settingsOpen = false
@@ -588,6 +623,9 @@ internal fun nextDiscoveryItem(items: List<MediaItem>, recent: List<String>): Me
     return (unseen.ifEmpty { items.filterNot { mediaKey(it) == recent.lastOrNull() } }).randomOrNull()
         ?: items.firstOrNull()
 }
+
+internal fun adjacentRowIndex(index: Int, targetSize: Int) = index.coerceIn(0, targetSize - 1)
+internal fun nextCatalogRetryDelay(current: Long) = (current * 2).coerceAtMost(5 * 60_000L)
 
 private suspend fun findTheaterFeature(items: List<MediaItem>, recent: List<String>): TheaterFeature? {
     val candidates = items.distinctBy(::mediaKey)
@@ -807,8 +845,10 @@ private fun Home(
     catalog: CatalogResult,
     apps: List<LauncherApp>,
     weather: WeatherNow?,
+    weatherState: WeatherLoadState,
     use24HourClock: Boolean,
     compactApps: Boolean,
+    focusLift: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
@@ -822,12 +862,30 @@ private fun Home(
 ) {
     val listState = rememberScrollState()
     val appListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
     var lastAppRowFocus by remember { mutableStateOf<FocusRequester?>(null) }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
-    val movieRowFocus = remember(sections.size) { List(sections.size) { FocusRequester() } }
+    val movieRowFocus = remember(sections) { sections.map { section -> List(section.items.size) { FocusRequester() } } }
+    val movieRowState = remember(sections) { sections.map { LazyListState() } }
+    var lastFirstMovieFocus by remember { mutableStateOf<FocusRequester?>(null) }
+    fun focusMovie(row: Int, item: Int) {
+        val target = adjacentRowIndex(item, movieRowFocus[row].size)
+        scope.launch {
+            movieRowState[row].scrollToItem((target - 2).coerceAtLeast(0))
+            delay(16)
+            movieRowFocus[row][target].requestFocus()
+        }
+    }
+    fun focusApps() {
+        val target = lastAppRowFocus ?: appFocus
+        scope.launch {
+            listState.scrollTo(0)
+            target.requestFocus()
+        }
+    }
     val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
@@ -876,6 +934,7 @@ private fun Home(
                 Hero(
                     hero,
                     weather,
+                    weatherState,
                     use24HourClock,
                     onSelect,
                     Modifier
@@ -889,8 +948,8 @@ private fun Home(
                 )
                 Spacer(Modifier.height(4.dp))
                 AppDock(
-                    apps, appListState, heroFocus, appFocus, movieRowFocus.first(), compactApps,
-                    onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
+                    apps, appListState, heroFocus, appFocus, lastFirstMovieFocus ?: movieRowFocus.first().first(), compactApps,
+                    focusLift, onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
                     onRowFocused = { lastAppRowFocus = it },
                 )
             }
@@ -898,9 +957,17 @@ private fun Home(
                 MediaRow(
                     section,
                     onSelect,
+                    movieRowState[index],
                     movieRowFocus[index],
-                    if (index == 0) lastAppRowFocus ?: appFocus else movieRowFocus[index - 1],
-                    movieRowFocus.getOrNull(index + 1),
+                    focusLift,
+                    onUp = { itemIndex ->
+                        if (index == 0) focusApps()
+                        else focusMovie(index - 1, itemIndex)
+                    },
+                    onDown = if (index < sections.lastIndex) ({ itemIndex -> focusMovie(index + 1, itemIndex) }) else null,
+                    onItemFocused = { itemIndex ->
+                        if (index == 0) lastFirstMovieFocus = movieRowFocus[index][itemIndex]
+                    },
                 )
             }
             Text(
@@ -921,6 +988,7 @@ private fun AppDock(
     firstFocus: FocusRequester,
     downFocus: FocusRequester,
     compact: Boolean,
+    focusLift: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
@@ -948,11 +1016,16 @@ private fun AppDock(
             horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
             modifier = Modifier.fillMaxSize().focusGroup(),
         ) {
-            itemsIndexed(apps, key = { _, app -> app.component.flattenToShortString() }) { index, app ->
+            itemsIndexed(
+                apps,
+                key = { _, app -> app.component.flattenToShortString() },
+                contentType = { _, _ -> "app" },
+            ) { index, app ->
                 val itemFocus = if (index == 0) firstFocus else remember { FocusRequester() }
                 AppCard(
                     app,
                     compact,
+                    focusLift,
                     onLaunch,
                     onConfigureApp,
                     moving = launcherAppKey(app) == movingAppKey,
@@ -976,7 +1049,7 @@ private fun AppDock(
                 val shelfFocus = remember { FocusRequester() }
                 val itemFocus = if (apps.isEmpty()) firstFocus else shelfFocus
                 ShelfActionCard(
-                    "Hidden", Icons.Default.Delete, compact, onHiddenApps,
+                    "Hidden", Icons.Default.Delete, compact, focusLift, onHiddenApps,
                     Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused(itemFocus) },
                 )
@@ -984,7 +1057,7 @@ private fun AppDock(
             item(key = "settings") {
                 val itemFocus = remember { FocusRequester() }
                 ShelfActionCard(
-                    "Settings", Icons.Default.Settings, compact, onSettings,
+                    "Settings", Icons.Default.Settings, compact, focusLift, onSettings,
                     Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused(itemFocus) },
                 )
@@ -1006,16 +1079,17 @@ private fun ShelfActionCard(
     label: String,
     icon: ImageVector,
     compact: Boolean,
+    focusLift: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(110), label = "$label focus")
+    val scale by animateFloatAsState(if (focused && focusLift) 1.04f else 1f, tween(110), label = "$label focus")
     val width = if (compact) 116.dp else 136.dp
     val height = if (compact) 68.dp else 78.dp
     Column(
-        modifier.width(width).graphicsLayer { scaleX = scale; scaleY = scale }
+        modifier.width(width).activeTransform(scale)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -1045,6 +1119,7 @@ private fun ShelfActionCard(
 private fun AppCard(
     app: LauncherApp,
     compact: Boolean,
+    focusLift: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigure: (LauncherApp) -> Unit,
     moving: Boolean,
@@ -1058,7 +1133,7 @@ private fun AppCard(
     var focused by remember { mutableStateOf(false) }
     var remotePressed by remember { mutableStateOf(false) }
     var remoteLongPress by remember { mutableStateOf(false) }
-    val tileScale by animateFloatAsState(if (moving) 1.055f else if (focused) 1.04f else 1f, tween(110), label = "app tile focus")
+    val tileScale by animateFloatAsState(if (moving) 1.055f else if (focused && focusLift) 1.04f else 1f, tween(110), label = "app tile focus")
     val floatOffset = if (moving) {
         val motion = rememberInfiniteTransition(label = "moving app")
         val offset by motion.animateFloat(
@@ -1074,11 +1149,7 @@ private fun AppCard(
     val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
     Column(
         modifier.width(tileWidth)
-            .graphicsLayer {
-                scaleX = tileScale
-                scaleY = tileScale
-                translationY = floatOffset
-            }
+            .activeTransform(tileScale, floatOffset)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -1311,7 +1382,7 @@ private fun AppOptionTile(
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.025f else 1f, tween(100), label = "$title focus")
     Column(
-        modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+        modifier.activeTransform(scale)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(18.dp))
             .background(if (focused) Violet.copy(alpha = .18f) else Color.White.copy(alpha = .055f))
@@ -1485,6 +1556,7 @@ private fun SettingsDialog(
     theaterEnabled: Boolean,
     idleMinutes: Int,
     compactApps: Boolean,
+    focusLift: Boolean,
     weatherLocation: String,
     weatherCelsius: Boolean,
     use24HourClock: Boolean,
@@ -1493,6 +1565,7 @@ private fun SettingsDialog(
     onTheaterEnabled: (Boolean) -> Unit,
     onIdleMinutes: (Int) -> Unit,
     onCompactApps: (Boolean) -> Unit,
+    onFocusLift: (Boolean) -> Unit,
     onWeatherLocation: () -> Unit,
     onWeatherCelsius: (Boolean) -> Unit,
     onClockFormat: (Boolean) -> Unit,
@@ -1518,8 +1591,13 @@ private fun SettingsDialog(
                             ActionButton("Hidden${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", icon = Icons.Default.Delete, onClick = onHiddenApps)
                         }
                         Spacer(Modifier.height(Gap))
-                        ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", icon = Icons.AutoMirrored.Filled.List) {
-                            onCompactApps(!compactApps)
+                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                            ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", icon = Icons.AutoMirrored.Filled.List) {
+                                onCompactApps(!compactApps)
+                            }
+                            ActionButton(if (focusLift) "Lifted focus" else "Outline focus") {
+                                onFocusLift(!focusLift)
+                            }
                         }
                     }
                     SettingsPanel("THEATER", "Play trailers when the launcher rests", Modifier.weight(1f)) {
@@ -1642,6 +1720,7 @@ private fun SearchDialog(
 private fun Hero(
     item: MediaItem,
     weather: WeatherNow?,
+    weatherState: WeatherLoadState,
     use24HourClock: Boolean,
     onSelect: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
@@ -1686,7 +1765,7 @@ private fun Hero(
                 )
             )
         )
-        HomeStatus(weather, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 30.dp, end = 58.dp))
+        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 30.dp, end = 58.dp))
         Column(
             Modifier.fillMaxHeight().width(620.dp).padding(start = 58.dp, top = 42.dp, end = 24.dp, bottom = 28.dp),
         ) {
@@ -1720,7 +1799,12 @@ private fun Hero(
 }
 
 @Composable
-private fun HomeStatus(weather: WeatherNow?, use24HourClock: Boolean, modifier: Modifier = Modifier) {
+private fun HomeStatus(
+    weather: WeatherNow?,
+    weatherState: WeatherLoadState,
+    use24HourClock: Boolean,
+    modifier: Modifier = Modifier,
+) {
     var time by remember { mutableStateOf(LocalTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -1736,10 +1820,18 @@ private fun HomeStatus(weather: WeatherNow?, use24HourClock: Boolean, modifier: 
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(formatHomeTime(time, use24HourClock), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        weather?.let {
-            Text("${weatherSymbol(it.code)}  ${it.temperature}°", color = Color.White.copy(alpha = .82f), fontSize = 15.sp)
-        }
+        Text(
+            weatherStatusText(weather, weatherState),
+            color = if (weatherState == WeatherLoadState.Error) Coral else Color.White.copy(alpha = .82f),
+            fontSize = 15.sp,
+        )
     }
+}
+
+internal fun weatherStatusText(weather: WeatherNow?, state: WeatherLoadState) = when (state) {
+    WeatherLoadState.Loading -> "◌  Weather"
+    WeatherLoadState.Error -> weather?.let { "${weatherSymbol(it.code)}  ${it.temperature}°  ·  !" } ?: "!  Weather"
+    WeatherLoadState.Ready -> weather?.let { "${weatherSymbol(it.code)}  ${it.temperature}°" } ?: "◌  Weather"
 }
 
 internal fun formatHomeTime(time: LocalTime, use24HourClock: Boolean) =
@@ -1756,27 +1848,42 @@ internal fun weatherSymbol(code: Int) = when (code) {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun MediaRow(
     section: CatalogSection,
     onSelect: (MediaItem) -> Unit,
-    firstFocus: FocusRequester,
-    upFocus: FocusRequester,
-    downFocus: FocusRequester?,
+    listState: LazyListState,
+    itemFocus: List<FocusRequester>,
+    focusLift: Boolean,
+    onUp: (Int) -> Unit,
+    onDown: ((Int) -> Unit)?,
+    onItemFocused: (Int) -> Unit,
 ) {
     Column {
         Text(section.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 48.dp))
         Spacer(Modifier.height(12.dp))
-        PosterStrip(
-            section.items,
-            onSelect,
-            modifier = Modifier.height(132.dp),
-            contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
-            firstModifier = Modifier.focusRequester(firstFocus),
-            itemModifier = Modifier.focusProperties {
-                up = upFocus
-                downFocus?.let { down = it }
-            },
-        )
+        CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
+            PosterStrip(
+                section.items,
+                onSelect,
+                state = listState,
+                liftOnFocus = focusLift,
+                modifier = Modifier.height(132.dp),
+                contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
+                itemModifier = { index ->
+                    Modifier.focusRequester(itemFocus[index]).onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionUp -> { onUp(index); true }
+                            Key.DirectionDown -> onDown?.let { it(index); true } ?: false
+                            else -> false
+                        }
+                    }.onFocusChanged {
+                        if (it.isFocused) onItemFocused(index)
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -1784,31 +1891,35 @@ private fun MediaRow(
 private fun PosterStrip(
     items: List<MediaItem>,
     onSelect: (MediaItem) -> Unit,
+    state: LazyListState? = null,
+    liftOnFocus: Boolean = true,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(start = 8.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
     firstModifier: Modifier = Modifier,
-    itemModifier: Modifier = Modifier,
+    itemModifier: (Int) -> Modifier = { Modifier },
 ) {
+    val rowState = state ?: rememberLazyListState()
     LazyRow(
+        state = rowState,
         contentPadding = contentPadding,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         modifier = modifier.focusGroup(),
     ) {
-        itemsIndexed(items, key = { _, item -> mediaKey(item) }) { index, item ->
-            PosterCard(item, onSelect, (if (index == 0) firstModifier else Modifier).then(itemModifier))
+        itemsIndexed(items, key = { _, item -> mediaKey(item) }, contentType = { _, _ -> "poster" }) { index, item ->
+            PosterCard(item, onSelect, liftOnFocus, (if (index == 0) firstModifier else Modifier).then(itemModifier(index)))
         }
     }
 }
 
 @Composable
-private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
+private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, liftOnFocus: Boolean, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
-    val cardScale by animateFloatAsState(if (focused) 1.025f else 1f, tween(100), label = "movie card focus")
+    val cardScale by animateFloatAsState(if (focused && liftOnFocus) 1.025f else 1f, tween(100), label = "movie card focus")
     Box(
         modifier
             .width(196.dp)
             .height(116.dp)
-            .graphicsLayer { scaleX = cardScale; scaleY = cardScale }
+            .activeTransform(cardScale)
             .zIndex(if (focused) 1f else 0f)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(12.dp))
@@ -1818,7 +1929,13 @@ private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, modifier:
     ) {
         val artwork = item.backdropUrl ?: item.posterUrl
         if (artwork != null) {
-            AsyncImage(artworkModel(artwork), item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            AsyncImage(
+                artworkModel(artwork),
+                item.title,
+                Modifier.fillMaxSize(),
+                error = painterResource(R.drawable.reelora_mark),
+                contentScale = ContentScale.Crop,
+            )
         } else {
             Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(52.dp).align(Alignment.Center))
         }
@@ -1861,7 +1978,7 @@ private fun ActionButton(
     val scale by animateFloatAsState(if (focused) 1.035f else 1f, tween(95), label = "$text button focus")
     Box(
         modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .activeTransform(scale)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -2088,7 +2205,9 @@ private fun CastRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.focusGroup(),
     ) {
-        items(cast, key = { "${it.id}-${it.name}" }) { person -> CastCard(person, person.id == selected?.id, downRequester, onSelect) }
+        items(cast, key = { "${it.id}-${it.name}" }, contentType = { "cast" }) { person ->
+            CastCard(person, person.id == selected?.id, downRequester, onSelect)
+        }
     }
 }
 
