@@ -23,6 +23,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -154,9 +157,18 @@ private val RowBringIntoViewSpec = object : BringIntoViewSpec {
     }
 }
 
-private fun Modifier.activeTransform(scale: Float, translationY: Float = 0f) =
-    if (scale == 1f && translationY == 0f) this
-    else graphicsLayer { scaleX = scale; scaleY = scale; this.translationY = translationY }
+private fun Modifier.activeTransform(
+    scale: Float,
+    translationY: Float = 0f,
+    translationX: Float = 0f,
+    alpha: Float = 1f,
+) = if (scale == 1f && translationY == 0f && translationX == 0f && alpha == 1f) this else graphicsLayer {
+    scaleX = scale
+    scaleY = scale
+    this.translationY = translationY
+    this.translationX = translationX
+    this.alpha = alpha
+}
 
 private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
 internal enum class WeatherLoadState { Loading, Ready, Error }
@@ -690,13 +702,18 @@ class TrailerActivity : Activity() {
             }
             elevation = 8 * density
         }
-        setContentView(FrameLayout(this).apply {
+        val content = FrameLayout(this).apply {
             addView(player, FrameLayout.LayoutParams(-1, -1))
             addView(releaseBadge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
                 topMargin = (96 * density).toInt()
                 marginEnd = (32 * density).toInt()
             })
-        })
+        }
+        setContentView(content)
+        content.translationX = 28 * density
+        content.alpha = .92f
+        content.animate().translationX(0f).alpha(1f).setDuration(220)
+            .setInterpolator(android.view.animation.PathInterpolator(.2f, .8f, .2f, 1f)).start()
         play(intent)
     }
 
@@ -711,7 +728,16 @@ class TrailerActivity : Activity() {
             ?.removePrefix("◷ COMING ")
             ?.let { "COMING  ·  $it" }
             .orEmpty()
-        releaseBadge.visibility = if (releaseBadge.text.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+        releaseBadge.animate().cancel()
+        if (releaseBadge.text.isEmpty()) {
+            releaseBadge.visibility = android.view.View.GONE
+        } else {
+            releaseBadge.visibility = android.view.View.VISIBLE
+            releaseBadge.alpha = 0f
+            releaseBadge.translationX = 24 * resources.displayMetrics.density
+            releaseBadge.animate().translationX(0f).alpha(1f).setStartDelay(320).setDuration(240)
+                .setInterpolator(android.view.animation.PathInterpolator(.2f, .8f, .2f, 1f)).start()
+        }
         if (manual) android.widget.Toast.makeText(
             this,
             "← →  Seek 10s   •   OK  Play/Pause   •   Back  Close",
@@ -1261,7 +1287,7 @@ private fun TvDialog(
             Box(
                 modifier.graphicsLayer {
                     this.alpha = alpha
-                    translationY = (1f - alpha) * 10f
+                    translationX = (1f - alpha) * 18f
                 }.clip(DialogShape).background(PanelBrush)
                     .border(1.dp, Color.White.copy(alpha = .12f), DialogShape),
             ) { content(close) }
@@ -1726,23 +1752,29 @@ private fun Hero(
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
-    var detailsVisible by remember(item.id) { mutableStateOf(false) }
-    val detailsAlpha by animateFloatAsState(if (detailsVisible) 1f else 0f, tween(180), label = "featured details")
-    LaunchedEffect(item.id) { detailsVisible = true }
+    var displayed by remember { mutableStateOf(item) }
+    val reveal = remember { Animatable(1f) }
+    LaunchedEffect(mediaKey(item)) {
+        if (mediaKey(displayed) == mediaKey(item)) return@LaunchedEffect
+        reveal.animateTo(0f, tween(100, easing = LinearEasing))
+        displayed = item
+        delay(16)
+        reveal.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+    }
     Box(
         modifier
             .fillMaxWidth()
             .height(360.dp)
             .onFocusChanged { focused = it.isFocused }
             .background(Brush.linearGradient(listOf(Color(0xFF2D1760), Color(0xFF10101E))))
-            .clickable(role = Role.Button) { onSelect(item) }
+            .clickable(role = Role.Button) { onSelect(displayed) }
     ) {
-        item.backdropUrl?.let {
+        displayed.backdropUrl?.let {
             AsyncImage(
                 model = artworkModel(it),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().activeTransform(1f, alpha = reveal.value),
             )
         }
         Box(
@@ -1770,20 +1802,21 @@ private fun Hero(
             Modifier.fillMaxHeight().width(620.dp).padding(start = 58.dp, top = 42.dp, end = 24.dp, bottom = 28.dp),
         ) {
             Box(
-                Modifier.weight(1f).graphicsLayer {
-                    alpha = detailsAlpha
-                    translationX = (1f - detailsAlpha) * 12f
-                },
+                Modifier.weight(1f).activeTransform(
+                    scale = 1f,
+                    translationX = (1f - reveal.value) * 10f,
+                    alpha = reveal.value,
+                ),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Column {
-                    if (releaseLabel(item.releaseDate).startsWith("◷")) InfoBadge(releaseLabel(item.releaseDate), Coral)
+                    if (releaseLabel(displayed.releaseDate).startsWith("◷")) InfoBadge(releaseLabel(displayed.releaseDate), Coral)
                     Spacer(Modifier.height(6.dp))
-                    Text(item.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(displayed.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(8.dp))
-                    Text("${item.year}   ·   ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .82f), fontSize = 13.sp)
+                    Text("${displayed.year}   ·   ★ ${"%.1f".format(displayed.score)}", color = Color.White.copy(alpha = .82f), fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text(item.overview, color = Color.White.copy(alpha = .68f), fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(displayed.overview, color = Color.White.copy(alpha = .68f), fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
