@@ -12,6 +12,8 @@
   <a href="https://github.com/andiq123/reelora/releases/download/latest/ReeloraTV-latest.apk"><strong>Download the latest APK</strong></a>
 </p>
 
+![Reelora TV home screen](docs/screenshots/home.png)
+
 ## Made for the couch
 
 Reelora combines a simple Apple TV-inspired app launcher with fresh movie discovery. Open installed TV apps immediately, then browse what is in cinemas, newly released, coming soon, and trending.
