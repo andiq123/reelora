@@ -36,7 +36,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -84,7 +83,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +92,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -110,10 +109,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -143,6 +142,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.time.LocalTime
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 private val Background = Color(0xFF080A0F)
@@ -246,8 +246,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var idleMinutes by remember {
             mutableStateOf(preferences.getInt("idleMinutes", 3).takeIf { it in THEATER_IDLE_OPTIONS } ?: 3)
         }
-        var compactApps by remember { mutableStateOf(preferences.getBoolean("compactApps", false)) }
         var focusLift by remember { mutableStateOf(preferences.getBoolean("focusLift", true)) }
+        var showAppLabels by remember { mutableStateOf(preferences.getBoolean("showAppLabels", true)) }
+        var moviesEnabled by remember { mutableStateOf(preferences.getBoolean("moviesEnabled", true)) }
+        var wallpaperSeed by remember { mutableStateOf(preferences.getInt("wallpaperSeed", 0)) }
         var weatherLocation by remember { mutableStateOf(preferences.getString("weatherLocation", "Chișinău").orEmpty()) }
         var weatherCelsius by remember { mutableStateOf(preferences.getBoolean("weatherCelsius", true)) }
         var weatherLatitude by remember { mutableStateOf(preferences.getString("weatherLatitude", null)?.toDoubleOrNull()) }
@@ -376,29 +378,49 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 wasPlaying
             },
         ) {
-            val catalog = result
+            val catalog = result ?: if (!moviesEnabled) CatalogResult(emptyList(), isDemo = true) else null
             if (catalog == null) {
                 Loading()
             } else {
-                Home(
-                    catalog,
-                    apps = visibleApps,
-                    weather = weather,
-                    weatherState = weatherState,
-                    use24HourClock = use24HourClock,
-                    compactApps = compactApps,
-                    focusLift = focusLift,
-                    onLaunch = ::launchApp,
-                    onSearch = { searching = true },
-                    onSettings = { settingsOpen = true },
-                    onHiddenApps = { hiddenAppsOpen = true },
-                    onConfigureApp = { configuredApp = it },
-                    movingAppKey = movingAppKey,
-                    moveConfirmReady = moveConfirmReady,
-                    onMoveApp = ::moveVisibleApp,
-                    onMoveDone = { movingAppKey = null },
-                    onSelect = { selected = it },
-                )
+                if (moviesEnabled) {
+                    Home(
+                        catalog,
+                        apps = visibleApps,
+                        weather = weather,
+                        weatherState = weatherState,
+                        use24HourClock = use24HourClock,
+                        focusLift = focusLift,
+                        showAppLabels = showAppLabels,
+                        onLaunch = ::launchApp,
+                        onSearch = { searching = true },
+                        onSettings = { settingsOpen = true },
+                        onHiddenApps = { hiddenAppsOpen = true },
+                        onConfigureApp = { configuredApp = it },
+                        movingAppKey = movingAppKey,
+                        moveConfirmReady = moveConfirmReady,
+                        onMoveApp = ::moveVisibleApp,
+                        onMoveDone = { movingAppKey = null },
+                        onSelect = { selected = it },
+                    )
+                } else {
+                    AppsOnlyHome(
+                        apps = visibleApps,
+                        weather = weather,
+                        weatherState = weatherState,
+                        use24HourClock = use24HourClock,
+                        focusLift = focusLift,
+                        showAppLabels = showAppLabels,
+                        wallpaperSeed = wallpaperSeed,
+                        onLaunch = ::launchApp,
+                        onSettings = { settingsOpen = true },
+                        onHiddenApps = { hiddenAppsOpen = true },
+                        onConfigureApp = { configuredApp = it },
+                        movingAppKey = movingAppKey,
+                        moveConfirmReady = moveConfirmReady,
+                        onMoveApp = ::moveVisibleApp,
+                        onMoveDone = { movingAppKey = null },
+                    )
+                }
                 if (searching) {
                     SearchDialog(
                         suggestions = catalog.sections.first().items.take(10),
@@ -426,8 +448,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 if (settingsOpen) SettingsDialog(
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
-                    compactApps = compactApps,
                     focusLift = focusLift,
+                    showAppLabels = showAppLabels,
+                    moviesEnabled = moviesEnabled,
                     weatherLocation = weatherLocation,
                     weatherCelsius = weatherCelsius,
                     use24HourClock = use24HourClock,
@@ -444,13 +467,24 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         idleMinutes = it
                         preferences.edit().putInt("idleMinutes", it).apply()
                     },
-                    onCompactApps = {
-                        compactApps = it
-                        preferences.edit().putBoolean("compactApps", it).apply()
-                    },
                     onFocusLift = {
                         focusLift = it
                         preferences.edit().putBoolean("focusLift", it).apply()
+                    },
+                    onShowAppLabels = {
+                        showAppLabels = it
+                        preferences.edit().putBoolean("showAppLabels", it).apply()
+                    },
+                    onMoviesEnabled = {
+                        moviesEnabled = it
+                        theater = null
+                        searching = false
+                        selected = null
+                        preferences.edit().putBoolean("moviesEnabled", it).apply()
+                    },
+                    onNextWallpaper = {
+                        wallpaperSeed += 1
+                        preferences.edit().putInt("wallpaperSeed", wallpaperSeed).apply()
                     },
                     onWeatherLocation = {
                         settingsOpen = false
@@ -551,9 +585,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             }
         }
 
-        LaunchedEffect(result, theater, theaterEnabled, idleMinutes, isForeground) {
+        LaunchedEffect(result, theater, theaterEnabled, idleMinutes, isForeground, moviesEnabled) {
             val catalog = result ?: return@LaunchedEffect
-            if (theater != null || !theaterEnabled || !isForeground) return@LaunchedEffect
+            if (theater != null || !theaterEnabled || !isForeground || !moviesEnabled) return@LaunchedEffect
             while (withTimeoutOrNull(idleMinutes * 60_000L) { inputEvents.receive() } != null) {}
             findTheaterFeature(
                 launcherMovieSections(catalog).flatMap { it.items },
@@ -880,8 +914,8 @@ private fun Home(
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
-    compactApps: Boolean,
     focusLift: Boolean,
+    showAppLabels: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
@@ -897,6 +931,9 @@ private fun Home(
     val appListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val stageScroll = remember(density) { with(density) { 548.dp.roundToPx() } }
+    val rowStep = remember(density) { with(density) { 200.dp.roundToPx() } }
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
     var lastAppRowFocus by remember { mutableStateOf<FocusRequester?>(null) }
@@ -915,7 +952,7 @@ private fun Home(
     fun focusApps() {
         val target = lastAppRowFocus ?: appFocus
         scope.launch {
-            listState.scrollTo(0)
+            listState.animateScrollTo(0, tween(300, easing = FastOutSlowInEasing))
             target.requestFocus()
         }
     }
@@ -963,30 +1000,28 @@ private fun Home(
                 }
             },
         ) {
-            Column {
-                Hero(
-                    hero,
-                    weather,
-                    weatherState,
-                    use24HourClock,
-                    onSelect,
-                    Modifier
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                                (lastAppRowFocus ?: appFocus).requestFocus()
-                                true
-                            } else false
-                        }
-                        .focusRequester(heroFocus),
-                )
-                Spacer(Modifier.height(4.dp))
-                AppDock(
-                    apps, appListState, heroFocus, appFocus, lastFirstMovieFocus ?: movieRowFocus.first().first(), compactApps,
-                    focusLift, onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
-                    onRowFocused = { lastAppRowFocus = it },
-                )
+            LauncherStage(
+                hero,
+                weather,
+                weatherState,
+                use24HourClock,
+            ) {
+                ActionButton(
+                    "View",
+                    Modifier.align(Alignment.TopStart).padding(start = 66.dp, top = 224.dp)
+                        .focusRequester(heroFocus).focusProperties { down = appFocus },
+                ) { onSelect(hero) }
+                Column(Modifier.align(Alignment.BottomStart).padding(bottom = 24.dp)) {
+                    AppDock(
+                        apps, appListState, heroFocus, appFocus,
+                        lastFirstMovieFocus ?: movieRowFocus.getOrNull(1)?.firstOrNull() ?: heroFocus,
+                        focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
+                        onRowFocused = { lastAppRowFocus = it },
+                    )
+                }
             }
-            sections.forEachIndexed { index, section ->
+            sections.drop(1).forEachIndexed { visibleIndex, section ->
+                val index = visibleIndex + 1
                 MediaRow(
                     section,
                     onSelect,
@@ -994,12 +1029,19 @@ private fun Home(
                     movieRowFocus[index],
                     focusLift,
                     onUp = { itemIndex ->
-                        if (index == 0) focusApps()
+                        if (index == 1) focusApps()
                         else focusMovie(index - 1, itemIndex)
                     },
                     onDown = if (index < sections.lastIndex) ({ itemIndex -> focusMovie(index + 1, itemIndex) }) else null,
                     onItemFocused = { itemIndex ->
-                        if (index == 0) lastFirstMovieFocus = movieRowFocus[index][itemIndex]
+                        if (index == 1) lastFirstMovieFocus = movieRowFocus[index][itemIndex]
+                        scope.launch {
+                            delay(16)
+                            listState.animateScrollTo(
+                                stageScroll + (index - 1) * rowStep,
+                                tween(300, easing = FastOutSlowInEasing),
+                            )
+                        }
                     },
                 )
             }
@@ -1014,14 +1056,89 @@ private fun Home(
 }
 
 @Composable
+private fun AppsOnlyHome(
+    apps: List<LauncherApp>,
+    weather: WeatherNow?,
+    weatherState: WeatherLoadState,
+    use24HourClock: Boolean,
+    focusLift: Boolean,
+    showAppLabels: Boolean,
+    wallpaperSeed: Int,
+    onLaunch: (LauncherApp) -> Unit,
+    onSettings: () -> Unit,
+    onHiddenApps: () -> Unit,
+    onConfigureApp: (LauncherApp) -> Unit,
+    movingAppKey: String?,
+    moveConfirmReady: Boolean,
+    onMoveApp: (LauncherApp, Int) -> Int,
+    onMoveDone: () -> Unit,
+) {
+    val appListState = rememberLazyListState()
+    val appFocus = remember { FocusRequester() }
+    val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
+    val wallpaper = remember(wallpaperSeed) {
+        "https://picsum.photos/seed/reelora-${LocalDate.now().toEpochDay() + wallpaperSeed}/1920/1080"
+    }
+    val ambient = rememberInfiniteTransition(label = "wallpaper drift")
+    val scale by ambient.animateFloat(
+        1.01f,
+        1.045f,
+        infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "wallpaper zoom",
+    )
+    LaunchedEffect(installedAppKeys) {
+        appListState.scrollToItem(0)
+        delay(160)
+        appFocus.requestFocus()
+    }
+    Box(
+        Modifier.fillMaxSize().clipToBounds().background(Background).onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
+                onSettings()
+                true
+            } else false
+        },
+    ) {
+        AsyncImage(
+            model = artworkModel(wallpaper),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale },
+        )
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Background.copy(alpha = .22f), Color.Transparent, Background.copy(alpha = .68f)))))
+        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp))
+        AppDock(
+            apps = apps,
+            listState = appListState,
+            upFocus = FocusRequester.Default,
+            firstFocus = appFocus,
+            downFocus = FocusRequester.Default,
+            focusLift = focusLift,
+            showLabels = showAppLabels,
+            onLaunch = onLaunch,
+            onConfigureApp = onConfigureApp,
+            movingAppKey = movingAppKey,
+            moveConfirmReady = moveConfirmReady,
+            onMoveApp = onMoveApp,
+            onMoveDone = onMoveDone,
+            onHiddenApps = onHiddenApps,
+            onSettings = onSettings,
+            onRowFocused = {},
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun AppDock(
     apps: List<LauncherApp>,
     listState: LazyListState,
     upFocus: FocusRequester,
     firstFocus: FocusRequester,
     downFocus: FocusRequester,
-    compact: Boolean,
     focusLift: Boolean,
+    showLabels: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
@@ -1031,22 +1148,21 @@ private fun AppDock(
     onHiddenApps: () -> Unit,
     onSettings: () -> Unit,
     onRowFocused: (FocusRequester) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val showStartFade by remember {
-        derivedStateOf { listState.firstVisibleItemIndex > 0 }
-    }
-    val showEndFade by remember {
-        derivedStateOf { listState.canScrollForward }
-    }
     Box(
-        Modifier.fillMaxWidth().height(if (compact) 110.dp else 120.dp)
-            .padding(horizontal = 48.dp),
+        modifier.fillMaxWidth().height(if (showLabels || movingAppKey != null) 110.dp else 88.dp)
+            .padding(horizontal = 48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(Color(0xC92D3340), Color(0xB91B202A))))
+            .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(24.dp)),
     ) {
+        CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
         LazyRow(
             state = listState,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize().focusGroup(),
         ) {
             itemsIndexed(
@@ -1057,8 +1173,8 @@ private fun AppDock(
                 val itemFocus = if (index == 0) firstFocus else remember { FocusRequester() }
                 AppCard(
                     app,
-                    compact,
                     focusLift,
+                    showLabels,
                     onLaunch,
                     onConfigureApp,
                     moving = launcherAppKey(app) == movingAppKey,
@@ -1082,7 +1198,7 @@ private fun AppDock(
                 val shelfFocus = remember { FocusRequester() }
                 val itemFocus = if (apps.isEmpty()) firstFocus else shelfFocus
                 ShelfActionCard(
-                    "Hidden", Icons.Default.Delete, compact, focusLift, onHiddenApps,
+                    "Hidden", Icons.Default.Delete, focusLift, showLabels, onHiddenApps,
                     Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused(itemFocus) },
                 )
@@ -1090,20 +1206,13 @@ private fun AppDock(
             item(key = "settings") {
                 val itemFocus = remember { FocusRequester() }
                 ShelfActionCard(
-                    "Settings", Icons.Default.Settings, compact, focusLift, onSettings,
+                    "Settings", Icons.Default.Settings, focusLift, showLabels, onSettings,
                     Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused(itemFocus) },
                 )
             }
         }
-        if (showStartFade) Box(
-            Modifier.align(Alignment.CenterStart).width(48.dp).fillMaxHeight()
-                .background(Brush.horizontalGradient(listOf(Background, Background, Background.copy(alpha = 0f)))),
-        )
-        if (showEndFade) Box(
-            Modifier.align(Alignment.CenterEnd).width(48.dp).fillMaxHeight()
-                .background(Brush.horizontalGradient(listOf(Background.copy(alpha = 0f), Background))),
-        )
+        }
     }
 }
 
@@ -1111,8 +1220,8 @@ private fun AppDock(
 private fun ShelfActionCard(
     label: String,
     icon: ImageVector,
-    compact: Boolean,
     focusLift: Boolean,
+    showLabel: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
@@ -1120,8 +1229,8 @@ private fun ShelfActionCard(
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     LaunchedEffect(focused) { if (focused) onFocused() }
-    val width = if (compact) 116.dp else 136.dp
-    val height = if (compact) 68.dp else 78.dp
+    val width = 116.dp
+    val height = 68.dp
     Card(
         onClick = onClick,
         modifier = modifier.width(width).zIndex(if (focused) 1f else 0f),
@@ -1134,15 +1243,17 @@ private fun ShelfActionCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
-                Modifier.width(width).height(height).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
+                Modifier.width(width).height(height).clip(RoundedCornerShape(16.dp))
                     .background(PanelBrush)
-                    .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .12f), RoundedCornerShape(if (compact) 16.dp else 19.dp)),
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .12f), RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = if (focused) Color.White else Color.White.copy(alpha = .72f), modifier = Modifier.size(28.dp))
+                Icon(icon, contentDescription = label, tint = if (focused) Color.White else Color.White.copy(alpha = .72f), modifier = Modifier.size(28.dp))
             }
-            Spacer(Modifier.height(8.dp))
-            Text(label, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp)
+            if (showLabel) {
+                Spacer(Modifier.height(8.dp))
+                Text(label, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = 11.sp)
+            }
         }
     }
 }
@@ -1151,8 +1262,8 @@ private fun ShelfActionCard(
 @OptIn(ExperimentalFoundationApi::class)
 private fun AppCard(
     app: LauncherApp,
-    compact: Boolean,
     focusLift: Boolean,
+    showLabel: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigure: (LauncherApp) -> Unit,
     moving: Boolean,
@@ -1176,8 +1287,8 @@ private fun AppCard(
         )
         offset
     } else 0f
-    val tileWidth = if (compact) 116.dp else 136.dp
-    val tileHeight = if (compact) 68.dp else 78.dp
+    val tileWidth = 116.dp
+    val tileHeight = 68.dp
     val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
     Card(
         onClick = { if (moving) onMoveDone() else onLaunch(app) },
@@ -1214,7 +1325,7 @@ private fun AppCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
-                Modifier.width(tileWidth).height(tileHeight).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
+                Modifier.width(tileWidth).height(tileHeight).clip(RoundedCornerShape(16.dp))
                     .background(if (app.banner == null) tileBackground else SolidColor(Color(0xFF171720))),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1228,19 +1339,21 @@ private fun AppCard(
                     Modifier.fillMaxSize().border(
                         if (moving) 3.dp else 2.dp,
                         if (moving) Coral else Violet,
-                        RoundedCornerShape(if (compact) 16.dp else 19.dp),
+                        RoundedCornerShape(16.dp),
                     )
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (moving) "←  MOVE $movePosition  →" else app.name,
-                color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .60f),
-                fontSize = if (compact) 11.sp else 12.sp,
-                fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (showLabel || moving) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (moving) "←  MOVE $movePosition  →" else app.name,
+                    color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .60f),
+                    fontSize = 11.sp,
+                    fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1572,8 +1685,9 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
 private fun SettingsDialog(
     theaterEnabled: Boolean,
     idleMinutes: Int,
-    compactApps: Boolean,
     focusLift: Boolean,
+    showAppLabels: Boolean,
+    moviesEnabled: Boolean,
     weatherLocation: String,
     weatherCelsius: Boolean,
     use24HourClock: Boolean,
@@ -1581,8 +1695,10 @@ private fun SettingsDialog(
     onSearch: () -> Unit,
     onTheaterEnabled: (Boolean) -> Unit,
     onIdleMinutes: (Int) -> Unit,
-    onCompactApps: (Boolean) -> Unit,
     onFocusLift: (Boolean) -> Unit,
+    onShowAppLabels: (Boolean) -> Unit,
+    onMoviesEnabled: (Boolean) -> Unit,
+    onNextWallpaper: () -> Unit,
     onWeatherLocation: () -> Unit,
     onWeatherCelsius: (Boolean) -> Unit,
     onClockFormat: (Boolean) -> Unit,
@@ -1602,32 +1718,38 @@ private fun SettingsDialog(
                 )
                 Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SettingsPanel("APP SHELF", "Find and size Home apps", Modifier.weight(1f)) {
+                    SettingsPanel("APP SHELF", "Find and manage Home apps", Modifier.weight(1f)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton("Search", modifier = Modifier.focusRequester(first), icon = Icons.Default.Search, onClick = onSearch)
-                            ActionButton("Hidden${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}", icon = Icons.Default.Delete, onClick = onHiddenApps)
+                            if (moviesEnabled) ActionButton("Search", modifier = Modifier.focusRequester(first), icon = Icons.Default.Search, onClick = onSearch)
+                            ActionButton(
+                                "Hidden${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}",
+                                modifier = if (moviesEnabled) Modifier else Modifier.focusRequester(first),
+                                icon = Icons.Default.Delete,
+                                onClick = onHiddenApps,
+                            )
                         }
                         Spacer(Modifier.height(Gap))
                         Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton(if (compactApps) "Compact layout" else "Comfortable layout", icon = Icons.AutoMirrored.Filled.List) {
-                                onCompactApps(!compactApps)
+                            ActionButton(if (showAppLabels) "Labels on" else "Labels off") {
+                                onShowAppLabels(!showAppLabels)
                             }
                             ActionButton(if (focusLift) "Lifted focus" else "Outline focus") {
                                 onFocusLift(!focusLift)
                             }
                         }
                     }
-                    SettingsPanel("THEATER", "Play trailers when the launcher rests", Modifier.weight(1f)) {
+                    SettingsPanel("HOME", "Featured movies or a calm wallpaper", Modifier.weight(1f)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton(if (theaterEnabled) "On" else "Off", icon = if (theaterEnabled) Icons.Default.PlayArrow else Icons.Default.Close) {
-                                onTheaterEnabled(!theaterEnabled)
-                            }
-                            ActionButton("After $idleMinutes min") {
-                                onIdleMinutes(nextTheaterIdleMinutes(idleMinutes))
-                            }
+                            ActionButton(if (moviesEnabled) "Movies on" else "Apps only") { onMoviesEnabled(!moviesEnabled) }
+                            if (!moviesEnabled) ActionButton("New wallpaper", icon = Icons.Default.Refresh, onClick = onNextWallpaper)
                         }
                         Spacer(Modifier.height(Gap))
-                        Text("Pauses while another app is open", color = Color.White.copy(alpha = .38f), fontSize = 11.sp)
+                        if (moviesEnabled) Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                            ActionButton(if (theaterEnabled) "Theater on" else "Theater off", icon = if (theaterEnabled) Icons.Default.PlayArrow else Icons.Default.Close) {
+                                onTheaterEnabled(!theaterEnabled)
+                            }
+                            ActionButton("After $idleMinutes min") { onIdleMinutes(nextTheaterIdleMinutes(idleMinutes)) }
+                        } else Text("Wallpaper changes daily · powered by Picsum", color = Color.White.copy(alpha = .38f), fontSize = 11.sp)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -1734,17 +1856,23 @@ private fun SearchDialog(
 }
 
 @Composable
-private fun Hero(
+private fun LauncherStage(
     item: MediaItem,
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
-    onSelect: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
     var displayed by remember { mutableStateOf(item) }
     val reveal = remember { Animatable(1f) }
+    val ambient = rememberInfiniteTransition(label = "artwork drift")
+    val artworkScale by ambient.animateFloat(
+        initialValue = 1.01f,
+        targetValue = 1.045f,
+        animationSpec = infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "artwork zoom",
+    )
     LaunchedEffect(mediaKey(item)) {
         if (mediaKey(displayed) == mediaKey(item)) return@LaunchedEffect
         reveal.animateTo(0f, tween(100, easing = LinearEasing))
@@ -1755,70 +1883,75 @@ private fun Hero(
     Box(
         modifier
             .fillMaxWidth()
-            .height(360.dp)
-            .onFocusChanged { focused = it.isFocused }
+            .height(548.dp)
+            .clipToBounds()
             .background(Brush.linearGradient(listOf(Color(0xFF2D1760), Color(0xFF10101E))))
-            .clickable(role = Role.Button) { onSelect(displayed) }
     ) {
         displayed.backdropUrl?.let {
             AsyncImage(
                 model = artworkModel(it),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().activeTransform(1f, alpha = reveal.value),
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = artworkScale
+                    scaleY = artworkScale
+                    alpha = reveal.value
+                },
             )
         }
         Box(
             Modifier.fillMaxSize().background(
                 Brush.horizontalGradient(
-                    0f to Background.copy(alpha = .96f),
-                    .46f to Background.copy(alpha = .48f),
-                    .82f to Background.copy(alpha = .08f),
-                    1f to Background.copy(alpha = .72f),
+                    0f to Background.copy(alpha = .44f),
+                    .5f to Background.copy(alpha = .12f),
+                    1f to Background.copy(alpha = .34f),
                 )
             )
         )
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to Background.copy(alpha = .62f),
-                    .18f to Color.Transparent,
-                    .76f to Color.Transparent,
+                    0f to Background.copy(alpha = .24f),
+                    .28f to Color.Transparent,
+                    .68f to Color.Transparent,
                     1f to Background,
                 )
             )
         )
-        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 30.dp, end = 58.dp))
         Column(
-            Modifier.fillMaxHeight().width(620.dp).padding(start = 58.dp, top = 42.dp, end = 24.dp, bottom = 28.dp),
-        ) {
-            Box(
-                Modifier.weight(1f).activeTransform(
+            Modifier.align(Alignment.TopStart).width(600.dp).padding(start = 66.dp, top = 108.dp, end = 24.dp)
+                .activeTransform(
                     scale = 1f,
                     translationX = (1f - reveal.value) * 10f,
                     alpha = reveal.value,
                 ),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Column {
-                    if (releaseLabel(displayed.releaseDate).startsWith("◷")) InfoBadge(releaseLabel(displayed.releaseDate), Coral)
-                    Spacer(Modifier.height(6.dp))
-                    Text(displayed.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(8.dp))
-                    Text("${displayed.year}   ·   ★ ${"%.1f".format(displayed.score)}", color = Color.White.copy(alpha = .82f), fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text(displayed.overview, color = Color.White.copy(alpha = .68f), fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        Box(
-            Modifier.align(Alignment.BottomEnd).padding(end = 58.dp, bottom = 28.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (focused) Color.White else Violet)
-                .padding(horizontal = 22.dp, vertical = 10.dp)
         ) {
-            Text("View", color = if (focused) Background else Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(
+                displayed.title,
+                color = Color.White,
+                fontSize = 36.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "${displayed.year}   ·   ★ ${"%.1f".format(displayed.score)}",
+                color = Color.White.copy(alpha = .82f),
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                displayed.overview,
+                color = Color.White.copy(alpha = .68f),
+                fontSize = 14.sp,
+                lineHeight = 19.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp))
+        content()
     }
 }
 
@@ -1921,6 +2054,8 @@ private fun PosterStrip(
     contentPadding: PaddingValues = PaddingValues(start = 8.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
     firstModifier: Modifier = Modifier,
     itemModifier: (Int) -> Modifier = { Modifier },
+    itemWidth: androidx.compose.ui.unit.Dp = 196.dp,
+    itemHeight: androidx.compose.ui.unit.Dp = 116.dp,
 ) {
     val rowState = state ?: rememberLazyListState()
     LazyRow(
@@ -1930,19 +2065,33 @@ private fun PosterStrip(
         modifier = modifier.focusGroup(),
     ) {
         itemsIndexed(items, key = { _, item -> mediaKey(item) }, contentType = { _, _ -> "poster" }) { index, item ->
-            PosterCard(item, onSelect, liftOnFocus, (if (index == 0) firstModifier else Modifier).then(itemModifier(index)))
+            PosterCard(
+                item,
+                onSelect,
+                liftOnFocus,
+                (if (index == 0) firstModifier else Modifier).then(itemModifier(index)),
+                itemWidth,
+                itemHeight,
+            )
         }
     }
 }
 
 @Composable
-private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, liftOnFocus: Boolean, modifier: Modifier = Modifier) {
+private fun PosterCard(
+    item: MediaItem,
+    onSelect: (MediaItem) -> Unit,
+    liftOnFocus: Boolean,
+    modifier: Modifier = Modifier,
+    width: androidx.compose.ui.unit.Dp = 196.dp,
+    height: androidx.compose.ui.unit.Dp = 116.dp,
+) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val shape = RoundedCornerShape(12.dp)
     Card(
         onClick = { onSelect(item) },
-        modifier = modifier.width(196.dp).height(116.dp).zIndex(if (focused) 1f else 0f),
+        modifier = modifier.width(width).height(height).zIndex(if (focused) 1f else 0f),
         shape = CardDefaults.shape(shape = shape),
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
         scale = CardDefaults.scale(focusedScale = if (liftOnFocus) 1.025f else 1f, pressedScale = .99f),
@@ -1960,7 +2109,7 @@ private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, liftOnFoc
             Box(Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter)
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))))
             Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Text(item.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${item.year}  ·  ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .68f), fontSize = 10.sp)
             }
         }
