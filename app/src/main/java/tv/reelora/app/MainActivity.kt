@@ -31,15 +31,17 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -98,7 +100,6 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -123,6 +124,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Border
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme
 import coil3.compose.AsyncImage
@@ -1110,33 +1117,33 @@ private fun ShelfActionCard(
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && focusLift) 1.04f else 1f, tween(110), label = "$label focus")
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    LaunchedEffect(focused) { if (focused) onFocused() }
     val width = if (compact) 116.dp else 136.dp
     val height = if (compact) 68.dp else 78.dp
-    Column(
-        modifier.width(width).activeTransform(scale)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }.clickable(role = Role.Button, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Card(
+        onClick = onClick,
+        modifier = modifier.width(width).zIndex(if (focused) 1f else 0f),
+        colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
+        scale = CardDefaults.scale(focusedScale = if (focusLift) 1.04f else 1f, pressedScale = .99f),
+        border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        interactionSource = interaction,
     ) {
-        Box(
-            Modifier.width(width).height(height).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
-                .background(PanelBrush)
-                .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = .12f), RoundedCornerShape(if (compact) 16.dp else 19.dp)),
-            contentAlignment = Alignment.Center,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Image(
-                imageVector = icon,
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(if (focused) Color.White else Color.White.copy(alpha = .72f)),
-                modifier = Modifier.size(28.dp),
-            )
+            Box(
+                Modifier.width(width).height(height).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
+                    .background(PanelBrush)
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .12f), RoundedCornerShape(if (compact) 16.dp else 19.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = if (focused) Color.White else Color.White.copy(alpha = .72f), modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(label, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp)
         }
-        Spacer(Modifier.height(8.dp))
-        Text(label, color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = if (compact) 11.sp else 12.sp)
     }
 }
 
@@ -1156,10 +1163,9 @@ private fun AppCard(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    var remotePressed by remember { mutableStateOf(false) }
-    var remoteLongPress by remember { mutableStateOf(false) }
-    val tileScale by animateFloatAsState(if (moving) 1.055f else if (focused && focusLift) 1.04f else 1f, tween(110), label = "app tile focus")
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    LaunchedEffect(focused) { if (focused) onFocused() }
     val floatOffset = if (moving) {
         val motion = rememberInfiniteTransition(label = "moving app")
         val offset by motion.animateFloat(
@@ -1173,13 +1179,12 @@ private fun AppCard(
     val tileWidth = if (compact) 116.dp else 136.dp
     val tileHeight = if (compact) 68.dp else 78.dp
     val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
-    Column(
-        modifier.width(tileWidth)
-            .activeTransform(tileScale, floatOffset)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
+    Card(
+        onClick = { if (moving) onMoveDone() else onLaunch(app) },
+        onLongClick = { if (!moving) onConfigure(app) },
+        modifier = modifier.width(tileWidth)
+            .activeTransform(1f, floatOffset)
+            .zIndex(if (focused || moving) 1f else 0f)
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
                 if (moving) {
@@ -1194,69 +1199,49 @@ private fun AppCard(
                     }
                     return@onPreviewKeyEvent true
                 }
-                if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER && keyCode != android.view.KeyEvent.KEYCODE_ENTER) {
-                    return@onPreviewKeyEvent false
-                }
-                when (event.type) {
-                    KeyEventType.KeyDown -> {
-                        remotePressed = true
-                        if (event.nativeKeyEvent.repeatCount > 0 && !remoteLongPress) {
-                            remoteLongPress = true
-                        }
-                        true
-                    }
-                    KeyEventType.KeyUp -> {
-                        if (remotePressed) {
-                            if (remoteLongPress) onConfigure(app) else onLaunch(app)
-                        }
-                        remotePressed = false
-                        remoteLongPress = false
-                        true
-                    }
-                    else -> false
-                }
-            }
-            .combinedClickable(
-                role = Role.Button,
-                onClick = { if (moving) onMoveDone() else onLaunch(app) },
-                onLongClick = { if (!moving) onConfigure(app) },
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
+                false
+            },
+        colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
+        scale = CardDefaults.scale(
+            scale = if (moving) 1.055f else 1f,
+            focusedScale = if (moving) 1.055f else if (focusLift) 1.04f else 1f,
+            pressedScale = if (moving) 1.055f else .99f,
+        ),
+        border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        interactionSource = interaction,
     ) {
-        Box(
-            Modifier.width(tileWidth).height(tileHeight).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
-                .background(if (app.banner == null) tileBackground else SolidColor(Color(0xFF171720))),
-            contentAlignment = Alignment.Center,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            AsyncImage(
-                model = app.banner ?: app.icon,
-                contentDescription = app.name,
-                contentScale = if (app.banner == null) ContentScale.Fit else ContentScale.Crop,
-                modifier = if (app.banner == null) {
-                    Modifier.fillMaxWidth(.82f).fillMaxHeight(.78f).align(Alignment.Center)
-                } else {
-                    Modifier.fillMaxSize()
-                },
-            )
-            if (focused || moving) {
-                Box(
+            Box(
+                Modifier.width(tileWidth).height(tileHeight).clip(RoundedCornerShape(if (compact) 16.dp else 19.dp))
+                    .background(if (app.banner == null) tileBackground else SolidColor(Color(0xFF171720))),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = app.banner ?: app.icon,
+                    contentDescription = app.name,
+                    contentScale = if (app.banner == null) ContentScale.Fit else ContentScale.Crop,
+                    modifier = if (app.banner == null) Modifier.fillMaxWidth(.82f).fillMaxHeight(.78f) else Modifier.fillMaxSize(),
+                )
+                if (focused || moving) Box(
                     Modifier.fillMaxSize().border(
                         if (moving) 3.dp else 2.dp,
-                        if (moving) Coral else Color.White.copy(alpha = .9f),
+                        if (moving) Coral else Violet,
                         RoundedCornerShape(if (compact) 16.dp else 19.dp),
-                    ),
+                    )
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (moving) "←  MOVE $movePosition  →" else app.name,
+                color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .60f),
+                fontSize = if (compact) 11.sp else 12.sp,
+                fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            if (moving) "←  MOVE $movePosition  →" else app.name,
-            color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .60f),
-            fontSize = if (compact) 11.sp else 12.sp,
-            fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -1405,25 +1390,31 @@ private fun AppOptionTile(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.025f else 1f, tween(100), label = "$title focus")
-    Column(
-        modifier.activeTransform(scale)
-            .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (focused) Violet.copy(alpha = .18f) else Color.White.copy(alpha = .055f))
-            .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .09f), RoundedCornerShape(18.dp))
-            .clickable(role = Role.Button, onClick = onClick).padding(18.dp),
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(18.dp)
+    Card(
+        onClick = onClick,
+        modifier = modifier.zIndex(if (focused) 1f else 0f),
+        shape = CardDefaults.shape(shape = shape),
+        colors = CardDefaults.colors(
+            containerColor = Color.White.copy(alpha = .055f),
+            focusedContainerColor = Violet.copy(alpha = .18f),
+            pressedContainerColor = Violet.copy(alpha = .26f),
+        ),
+        scale = CardDefaults.scale(focusedScale = 1.025f, pressedScale = .99f),
+        border = CardDefaults.border(
+            border = Border(BorderStroke(1.dp, Color.White.copy(alpha = .09f)), shape = shape),
+            focusedBorder = Border(BorderStroke(2.dp, Violet), shape = shape),
+        ),
+        interactionSource = interaction,
     ) {
-        Image(
-            imageVector = icon,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(if (focused) Color.White else Color.White.copy(alpha = .68f)),
-            modifier = Modifier.size(27.dp),
-        )
-        Spacer(Modifier.height(14.dp))
-        Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(subtitle, color = Color.White.copy(alpha = if (focused) .68f else .44f), fontSize = 11.sp, maxLines = 1)
+        Column(Modifier.padding(18.dp)) {
+            Icon(icon, contentDescription = null, tint = if (focused) Color.White else Color.White.copy(alpha = .68f), modifier = Modifier.size(27.dp))
+            Spacer(Modifier.height(14.dp))
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = Color.White.copy(alpha = if (focused) .68f else .44f), fontSize = 11.sp, maxLines = 1)
+        }
     }
 }
 
@@ -1946,42 +1937,32 @@ private fun PosterStrip(
 
 @Composable
 private fun PosterCard(item: MediaItem, onSelect: (MediaItem) -> Unit, liftOnFocus: Boolean, modifier: Modifier = Modifier) {
-    var focused by remember { mutableStateOf(false) }
-    val cardScale by animateFloatAsState(if (focused && liftOnFocus) 1.025f else 1f, tween(100), label = "movie card focus")
-    Box(
-        modifier
-            .width(196.dp)
-            .height(116.dp)
-            .activeTransform(cardScale)
-            .zIndex(if (focused) 1f else 0f)
-            .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))
-            .border(if (focused) 2.dp else 0.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button) { onSelect(item) }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(12.dp)
+    Card(
+        onClick = { onSelect(item) },
+        modifier = modifier.width(196.dp).height(116.dp).zIndex(if (focused) 1f else 0f),
+        shape = CardDefaults.shape(shape = shape),
+        colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
+        scale = CardDefaults.scale(focusedScale = if (liftOnFocus) 1.025f else 1f, pressedScale = .99f),
+        border = CardDefaults.border(focusedBorder = Border(BorderStroke(3.dp, Violet), shape = shape)),
+        interactionSource = interaction,
     ) {
-        val artwork = item.backdropUrl ?: item.posterUrl
-        if (artwork != null) {
-            AsyncImage(
-                artworkModel(artwork),
-                item.title,
-                Modifier.fillMaxSize(),
-                error = painterResource(R.drawable.reelora_mark),
-                contentScale = ContentScale.Crop,
+        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))) {
+            val artwork = item.backdropUrl ?: item.posterUrl
+            if (artwork != null) AsyncImage(
+                artworkModel(artwork), item.title, Modifier.fillMaxSize(),
+                error = painterResource(R.drawable.reelora_mark), contentScale = ContentScale.Crop,
             )
-        } else {
-            Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(52.dp).align(Alignment.Center))
-        }
-        cardReleaseLabel(item.releaseDate)?.let {
-            InfoBadge(it, Coral, Modifier.align(Alignment.TopStart).padding(7.dp))
-        }
-        Box(
-            Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))),
-        )
-        Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Text(item.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${item.year}  ·  ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .68f), fontSize = 10.sp)
+            else Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(52.dp).align(Alignment.Center))
+            cardReleaseLabel(item.releaseDate)?.let { InfoBadge(it, Coral, Modifier.align(Alignment.TopStart).padding(7.dp)) }
+            Box(Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))))
+            Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Text(item.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${item.year}  ·  ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .68f), fontSize = 10.sp)
+            }
         }
     }
 }
@@ -2007,32 +1988,34 @@ private fun ActionButton(
     icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.035f else 1f, tween(95), label = "$text button focus")
-    Box(
-        modifier
-            .activeTransform(scale)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
-            .clip(ControlShape)
-            .background(if (focused) Violet.copy(alpha = .22f) else Color.White.copy(alpha = .07f))
-            .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .09f), ControlShape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 11.dp)
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    LaunchedEffect(focused) { if (focused) onFocused() }
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ButtonDefaults.shape(shape = ControlShape),
+        colors = ButtonDefaults.colors(
+            containerColor = Color.White.copy(alpha = .07f),
+            contentColor = Color.White.copy(alpha = .82f),
+            focusedContainerColor = Violet.copy(alpha = .22f),
+            focusedContentColor = Color.White,
+            pressedContainerColor = Violet.copy(alpha = .32f),
+            pressedContentColor = Color.White,
+        ),
+        scale = ButtonDefaults.scale(focusedScale = 1.035f, pressedScale = .99f),
+        border = ButtonDefaults.border(
+            border = Border(BorderStroke(1.dp, Color.White.copy(alpha = .09f)), shape = ControlShape),
+            focusedBorder = Border(BorderStroke(2.dp, Violet), shape = ControlShape),
+        ),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 11.dp),
+        interactionSource = interaction,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            icon?.let {
-                Image(
-                    imageVector = it,
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(if (focused) Color.White else Color.White.copy(alpha = .78f)),
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Text(text, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        icon?.let {
+            Icon(it, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
         }
+        Text(text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
     }
 }
 
@@ -2246,33 +2229,33 @@ private fun CastRow(
 
 @Composable
 private fun CastCard(person: CastMember, selected: Boolean, downRequester: FocusRequester?, onSelect: (CastMember) -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    Column(
-        Modifier
-            .width(96.dp)
-            .focusProperties { downRequester?.let { down = it } }
-            .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button) { onSelect(person) }
-            .padding(vertical = 5.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Card(
+        onClick = { onSelect(person) },
+        modifier = Modifier.width(96.dp).zIndex(if (focused) 1f else 0f)
+            .focusProperties { downRequester?.let { down = it } },
+        colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
+        scale = CardDefaults.scale(focusedScale = 1.04f, pressedScale = .98f),
+        border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
+        interactionSource = interaction,
     ) {
-        Box(
-            Modifier.size(58.dp).clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Color(0xFF4B2B86), Color(0xFF211B3A))))
-                .border(if (focused) 3.dp else if (selected) 2.dp else 0.dp, if (focused) Color.White else Coral, CircleShape),
-            contentAlignment = Alignment.Center,
+        Column(
+            Modifier.padding(vertical = 5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (person.profileUrl != null) {
-                AsyncImage(artworkModel(person.profileUrl), person.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            } else {
-                Text(person.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Box(
+                Modifier.size(58.dp).clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Color(0xFF4B2B86), Color(0xFF211B3A))))
+                    .border(if (focused) 3.dp else if (selected) 2.dp else 0.dp, if (focused) Violet else Coral, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (person.profileUrl != null) AsyncImage(artworkModel(person.profileUrl), person.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Text(person.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
-        }
-        Spacer(Modifier.height(5.dp))
-        Text(person.name, color = if (selected) Coral else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-        if (person.character.isNotBlank()) {
-            Text(person.character, color = Color.White.copy(alpha = .52f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(5.dp))
+            Text(person.name, color = if (selected) Coral else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            if (person.character.isNotBlank()) Text(person.character, color = Color.White.copy(alpha = .52f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
     }
 }
