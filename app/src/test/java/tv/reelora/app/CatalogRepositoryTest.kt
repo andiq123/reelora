@@ -121,4 +121,14 @@ class CatalogRepositoryTest {
         assertEquals("◷ SEP 4", cardReleaseLabel("2026-09-04", today))
         assertNull(cardReleaseLabel("2026-06-17", today))
     }
+
+    @Test
+    fun footballWidgetFormatsScheduledAndCompletedMatches() {
+        val completed = FootballMatch("Fulham", "Chelsea", "2026-08-24", "19:00", 2, 3)
+        val scheduled = completed.copy(homeScore = null, awayScore = null)
+
+        assertEquals("2–3", footballScore(completed))
+        assertEquals("vs", footballScore(scheduled))
+        assertEquals("Mon, Aug 24 · 19:00", footballSchedule(completed))
+    }
 }

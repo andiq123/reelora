@@ -54,6 +54,8 @@ data class MediaDetails(
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 @Immutable data class WeatherNow(val temperature: Int, val code: Int)
+@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?)
+@Immutable data class FootballSnapshot(val next: FootballMatch?, val previous: FootballMatch?)
 @Immutable
 data class WeatherPlace(
     val name: String,
@@ -95,6 +97,28 @@ object WeatherRepository {
         ).getJSONObject("current")
         WeatherNow(current.getDouble("temperature_2m").toInt(), current.getInt("weather_code"))
     }.getOrNull()
+}
+
+object FootballRepository {
+    private const val LEAGUE = "4328"
+    private const val BASE = "https://www.thesportsdb.com/api/v1/json/123"
+
+    suspend fun load(): FootballSnapshot? = coroutineScope {
+        val next = async { runCatching { readJson("$BASE/eventsnextleague.php?id=$LEAGUE").firstFootballMatch() }.getOrNull() }
+        val previous = async { runCatching { readJson("$BASE/eventspastleague.php?id=$LEAGUE").firstFootballMatch() }.getOrNull() }
+        FootballSnapshot(next.await(), previous.await()).takeIf { it.next != null || it.previous != null }
+    }
+}
+
+internal fun JSONObject.firstFootballMatch(): FootballMatch? = optJSONArray("events")?.optJSONObject(0)?.let { event ->
+    FootballMatch(
+        home = event.optString("strHomeTeam"),
+        away = event.optString("strAwayTeam"),
+        date = event.optString("dateEventLocal").ifBlank { event.optString("dateEvent") },
+        time = event.optString("strTimeLocal").ifBlank { event.optString("strTime") }.take(5),
+        homeScore = event.optString("intHomeScore").toIntOrNull(),
+        awayScore = event.optString("intAwayScore").toIntOrNull(),
+    )
 }
 
 object CatalogRepository {

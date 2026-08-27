@@ -250,6 +250,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var showAppLabels by remember { mutableStateOf(preferences.getBoolean("showAppLabels", true)) }
         var moviesEnabled by remember { mutableStateOf(preferences.getBoolean("moviesEnabled", true)) }
         var wallpaperSeed by remember { mutableStateOf(preferences.getInt("wallpaperSeed", 0)) }
+        var footballWidgetEnabled by remember { mutableStateOf(preferences.getBoolean("footballWidgetEnabled", false)) }
         var weatherLocation by remember { mutableStateOf(preferences.getString("weatherLocation", "Chișinău").orEmpty()) }
         var weatherCelsius by remember { mutableStateOf(preferences.getBoolean("weatherCelsius", true)) }
         var weatherLatitude by remember { mutableStateOf(preferences.getString("weatherLatitude", null)?.toDoubleOrNull()) }
@@ -411,6 +412,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         focusLift = focusLift,
                         showAppLabels = showAppLabels,
                         wallpaperSeed = wallpaperSeed,
+                        footballWidgetEnabled = footballWidgetEnabled,
                         onLaunch = ::launchApp,
                         onSettings = { settingsOpen = true },
                         onHiddenApps = { hiddenAppsOpen = true },
@@ -451,6 +453,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     focusLift = focusLift,
                     showAppLabels = showAppLabels,
                     moviesEnabled = moviesEnabled,
+                    footballWidgetEnabled = footballWidgetEnabled,
                     weatherLocation = weatherLocation,
                     weatherCelsius = weatherCelsius,
                     use24HourClock = use24HourClock,
@@ -485,6 +488,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onNextWallpaper = {
                         wallpaperSeed += 1
                         preferences.edit().putInt("wallpaperSeed", wallpaperSeed).apply()
+                    },
+                    onFootballWidget = {
+                        footballWidgetEnabled = it
+                        preferences.edit().putBoolean("footballWidgetEnabled", it).apply()
                     },
                     onWeatherLocation = {
                         settingsOpen = false
@@ -1064,6 +1071,7 @@ private fun AppsOnlyHome(
     focusLift: Boolean,
     showAppLabels: Boolean,
     wallpaperSeed: Int,
+    footballWidgetEnabled: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSettings: () -> Unit,
     onHiddenApps: () -> Unit,
@@ -1075,6 +1083,8 @@ private fun AppsOnlyHome(
 ) {
     val appListState = rememberLazyListState()
     val appFocus = remember { FocusRequester() }
+    var football by remember { mutableStateOf<FootballSnapshot?>(null) }
+    var footballState by remember { mutableStateOf(WeatherLoadState.Loading) }
     val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
     val wallpaper = remember(wallpaperSeed) {
         "https://picsum.photos/seed/reelora-${LocalDate.now().toEpochDay() + wallpaperSeed}/1920/1080"
@@ -1090,6 +1100,15 @@ private fun AppsOnlyHome(
         appListState.scrollToItem(0)
         delay(160)
         appFocus.requestFocus()
+    }
+    LaunchedEffect(footballWidgetEnabled) {
+        if (!footballWidgetEnabled) return@LaunchedEffect
+        while (true) {
+            footballState = WeatherLoadState.Loading
+            football = FootballRepository.load()
+            footballState = if (football == null) WeatherLoadState.Error else WeatherLoadState.Ready
+            delay(if (football == null) 60_000L else 30 * 60_000L)
+        }
     }
     Box(
         Modifier.fillMaxSize().clipToBounds().background(Background).onPreviewKeyEvent { event ->
@@ -1107,6 +1126,14 @@ private fun AppsOnlyHome(
         )
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Background.copy(alpha = .22f), Color.Transparent, Background.copy(alpha = .68f)))))
         HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp))
+        if (footballWidgetEnabled) FootballWidget(
+            football,
+            footballState,
+            Modifier.align(Alignment.BottomStart).padding(
+                start = 48.dp,
+                bottom = 48.dp + (if (showAppLabels || movingAppKey != null) 110.dp else 88.dp) + 18.dp,
+            ),
+        )
         AppDock(
             apps = apps,
             listState = appListState,
@@ -1127,6 +1154,52 @@ private fun AppsOnlyHome(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
         )
     }
+}
+
+@Composable
+private fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState, modifier: Modifier = Modifier) {
+    Column(
+        modifier.width(520.dp).clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(Color(0xD92D3340), Color(0xCC171B24))))
+            .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(24.dp))
+            .padding(horizontal = 22.dp, vertical = 16.dp),
+    ) {
+        Text("⚽  FOOTBALL · PREMIER LEAGUE", color = Violet, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+        Spacer(Modifier.height(10.dp))
+        when (state) {
+            WeatherLoadState.Loading -> Text("Loading fixtures…", color = Color.White.copy(alpha = .66f), fontSize = 15.sp)
+            WeatherLoadState.Error -> Text("Fixtures unavailable · retrying", color = Coral, fontSize = 15.sp)
+            WeatherLoadState.Ready -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                FootballMatchSummary("NEXT", snapshot?.next, Modifier.weight(1f))
+                FootballMatchSummary("LAST", snapshot?.previous, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun FootballMatchSummary(label: String, match: FootballMatch?, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, color = Color.White.copy(alpha = .46f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            match?.let { "${it.home}  ${footballScore(it)}  ${it.away}" } ?: "No fixture",
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        match?.let { Text(footballSchedule(it), color = Color.White.copy(alpha = .58f), fontSize = 11.sp, maxLines = 1) }
+    }
+}
+
+internal fun footballScore(match: FootballMatch) =
+    if (match.homeScore != null && match.awayScore != null) "${match.homeScore}–${match.awayScore}" else "vs"
+
+internal fun footballSchedule(match: FootballMatch): String {
+    val date = runCatching { LocalDate.parse(match.date) }.getOrNull()
+        ?.format(DateTimeFormatter.ofPattern("EEE, MMM d")) ?: match.date
+    return listOf(date, match.time).filter(String::isNotBlank).joinToString(" · ")
 }
 
 @Composable
@@ -1363,6 +1436,7 @@ private fun TvDialog(
     onDismiss: () -> Unit,
     modifier: Modifier,
     ambient: Boolean = true,
+    previewBackground: Boolean = false,
     content: @Composable androidx.compose.foundation.layout.BoxScope.(() -> Unit) -> Unit,
 ) {
     var visible by remember { mutableStateOf(false) }
@@ -1380,13 +1454,18 @@ private fun TvDialog(
         }
     }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Background.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxSize().background(Background.copy(alpha = if (previewBackground) .38f else .9f)),
+            contentAlignment = Alignment.Center,
+        ) {
             if (ambient) AmbientBackdrop()
             Box(
                 modifier.graphicsLayer {
                     this.alpha = alpha
                     translationX = (1f - alpha) * 18f
-                }.clip(DialogShape).background(PanelBrush)
+                }.clip(DialogShape).background(
+                    if (previewBackground) Brush.verticalGradient(listOf(Color(0xE61D2029), Color(0xE60F1117))) else PanelBrush
+                )
                     .border(1.dp, Color.White.copy(alpha = .12f), DialogShape),
             ) { content(close) }
         }
@@ -1688,6 +1767,7 @@ private fun SettingsDialog(
     focusLift: Boolean,
     showAppLabels: Boolean,
     moviesEnabled: Boolean,
+    footballWidgetEnabled: Boolean,
     weatherLocation: String,
     weatherCelsius: Boolean,
     use24HourClock: Boolean,
@@ -1699,6 +1779,7 @@ private fun SettingsDialog(
     onShowAppLabels: (Boolean) -> Unit,
     onMoviesEnabled: (Boolean) -> Unit,
     onNextWallpaper: () -> Unit,
+    onFootballWidget: (Boolean) -> Unit,
     onWeatherLocation: () -> Unit,
     onWeatherCelsius: (Boolean) -> Unit,
     onClockFormat: (Boolean) -> Unit,
@@ -1709,7 +1790,7 @@ private fun SettingsDialog(
 ) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(180); first.requestFocus() }
-    TvDialog(onDismiss, Modifier.width(880.dp)) { close ->
+    TvDialog(onDismiss, Modifier.width(880.dp), ambient = moviesEnabled, previewBackground = !moviesEnabled) { close ->
         Column(Modifier.padding(DialogPadding)) {
                 DialogHeader(
                     "Settings",
@@ -1749,7 +1830,12 @@ private fun SettingsDialog(
                                 onTheaterEnabled(!theaterEnabled)
                             }
                             ActionButton("After $idleMinutes min") { onIdleMinutes(nextTheaterIdleMinutes(idleMinutes)) }
-                        } else Text("Wallpaper changes daily · powered by Picsum", color = Color.White.copy(alpha = .38f), fontSize = 11.sp)
+                        } else Row(horizontalArrangement = Arrangement.spacedBy(Gap), verticalAlignment = Alignment.CenterVertically) {
+                            ActionButton(if (footballWidgetEnabled) "Football on" else "Football off") {
+                                onFootballWidget(!footballWidgetEnabled)
+                            }
+                            Text("Daily wallpaper · Picsum", color = Color.White.copy(alpha = .38f), fontSize = 11.sp)
+                        }
                     }
                 }
                 Spacer(Modifier.height(16.dp))
