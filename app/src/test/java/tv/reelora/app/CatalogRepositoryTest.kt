@@ -129,8 +129,13 @@ class CatalogRepositoryTest {
 
         assertEquals("2–3", footballScore(completed))
         assertEquals("vs", footballScore(scheduled))
-        assertEquals("Mon, Aug 24 · 19:00", footballSchedule(completed))
+        assertEquals("Mon, 24 Aug · 19:00", footballSchedule(completed))
         assertTrue(isLiveFootballStatus("67'"))
         assertTrue(!isLiveFootballStatus("FT"))
+        val premierLeague = scheduled.copy(date = "2026-08-28", priority = 2)
+        val worldCup = scheduled.copy(date = "2030-06-08", priority = 0)
+        assertEquals(premierLeague, selectNextFootballMatch(listOf(worldCup, premierLeague)))
+        assertEquals("World Cup începe mâine", footballHintText(FootballHint("WORLD CUP", 1), true))
+        assertEquals("CHAMPIONS LEAGUE", localizeUi("CHAMPIONS LEAGUE", true))
     }
 }
