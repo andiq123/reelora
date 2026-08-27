@@ -5,7 +5,7 @@
 <h1 align="center">Reelora TV</h1>
 
 <p align="center">
-  A fast, cinematic home launcher for Android TV—apps and fresh movies in one place.
+  A calm, cinematic home launcher built for Android TV remotes.
 </p>
 
 <p align="center">
@@ -14,32 +14,35 @@
 
 ![Reelora TV home screen](docs/screenshots/home.png)
 
-## Made for the couch
+## Your TV, simplified
 
-Reelora combines a simple Apple TV-inspired app launcher with fresh movie discovery. Open installed TV apps immediately, then browse what is in cinemas, newly released, coming soon, and trending.
+Reelora blends an Apple TV-inspired app shelf with optional movie discovery. It opens directly into a focused, remote-first home screen where apps, time, weather, live match context, and entertainment recommendations feel like one coherent experience.
 
 ## Highlights
 
-- Native installed-app discovery, one-click launching, and a local organizer for moving or hiding apps
-- Optional Android home-screen role with a shortcut to choose the default launcher
-- Smooth directional navigation with clear, stable TV focus states
-- Current cinema releases, new movies, upcoming titles, and weekly trends
-- Fast search with suggestions, the native TV keyboard, and voice input
-- Rich title details with artwork, synopsis, ratings, genres, cast, trailers, and availability
-- Embedded trailers plus an optional idle theater mode with persisted timing controls
-- Compact release dates, provider badges, cast work, and relevant recommendations
-- Optimized layouts for Android 11 televisions and Fire TV devices
+- **A real launcher** — discovers installed TV apps, launches them instantly, and can become the default Android home screen
+- **Remote-first organization** — hold an app to move, rename, inspect, or hide it; restore hidden apps whenever needed
+- **Two home experiences** — choose cinematic movie discovery or a distraction-free apps-only wallpaper mode
+- **Smart football glance** — optional World Cup, Champions League, and Premier League fixtures, results, live scores, and timely hints
+- **Useful at a glance** — persistent local weather, 12/24-hour clock, location search, Celsius or Fahrenheit
+- **Cinematic discovery** — current releases, weekly trends, recommendations, rich artwork, cast, ratings, trailers, and availability
+- **Search made for TV** — suggestions, native on-screen keyboard, and voice input
+- **Ambient theater mode** — starts trailers after a configurable idle period and avoids recently shown titles
+- **English and Romanian** — switch the complete launcher interface from Settings while competition names remain familiar
+- **Fast by design** — stable focus, restrained GPU animations, lazy rows, cached data, and compact layouts for modest TV hardware
 
-## A clean home flow
+## Designed for the couch
 
-A rotating current title sits above the customizable app shelf, followed by four concise discovery rows. Settings control app organization, theater timing, Android settings, and the default home app without cluttering the launcher.
+The app shelf stays visually anchored while focus moves. Selected tiles lift outside their artwork instead of zooming the icon, dialogs retain the current wallpaper or movie backdrop, and every important action is reachable with directional keys, OK, Back, or Menu.
+
+Settings keep customization in one place: home mode, wallpapers, app labels, focus style, football, weather, language, theater timing, hidden apps, and Android launcher controls.
 
 ## Install
 
-Download **ReeloraTV-latest.apk** from the link above, allow installation from unknown sources on the TV, and open the APK. The package is updated automatically whenever a change lands on `main`.
+Download **ReeloraTV-latest.apk** above, allow installation from unknown sources, and open it on an Android 11+ TV or Fire TV device. A fresh signed APK is published automatically whenever `main` changes.
 
 Reelora is a personal launcher and discovery app, not a streaming service. Provider availability is informational and trailers play through YouTube inside the app.
 
 ## Data notice
 
-This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming availability data is supplied through TMDB's JustWatch integration.
+This product uses the TMDB API but is not endorsed or certified by TMDB. Availability is supplied through TMDB's JustWatch integration. Weather comes from Open-Meteo, wallpapers from Picsum Photos, and football fixtures from TheSportsDB.
