@@ -1107,7 +1107,7 @@ private fun AppsOnlyHome(
             footballState = WeatherLoadState.Loading
             football = FootballRepository.load()
             footballState = if (football == null) WeatherLoadState.Error else WeatherLoadState.Ready
-            delay(if (football == null) 60_000L else 30 * 60_000L)
+            delay(if (football == null) 60_000L else 2 * 60_000L)
         }
     }
     Box(
@@ -1129,10 +1129,7 @@ private fun AppsOnlyHome(
         if (footballWidgetEnabled) FootballWidget(
             football,
             footballState,
-            Modifier.align(Alignment.BottomStart).padding(
-                start = 48.dp,
-                bottom = 48.dp + (if (showAppLabels || movingAppKey != null) 110.dp else 88.dp) + 18.dp,
-            ),
+            Modifier.align(Alignment.TopStart).padding(top = 28.dp, start = 58.dp),
         )
         AppDock(
             apps = apps,
@@ -1159,17 +1156,35 @@ private fun AppsOnlyHome(
 @Composable
 private fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState, modifier: Modifier = Modifier) {
     Column(
-        modifier.width(520.dp).clip(RoundedCornerShape(24.dp))
+        modifier.width(900.dp).clip(RoundedCornerShape(24.dp))
             .background(Brush.linearGradient(listOf(Color(0xD92D3340), Color(0xCC171B24))))
             .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(24.dp))
-            .padding(horizontal = 22.dp, vertical = 16.dp),
+            .padding(horizontal = 24.dp, vertical = 18.dp),
     ) {
-        Text("⚽  FOOTBALL · PREMIER LEAGUE", color = Violet, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
-        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp)).background(Violet), contentAlignment = Alignment.Center) {
+                Text("PL", color = Background, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("PREMIER LEAGUE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp)
+            snapshot?.live?.let {
+                Spacer(Modifier.width(12.dp))
+                Row(
+                    Modifier.clip(RoundedCornerShape(50)).background(Coral.copy(alpha = .18f)).padding(horizontal = 9.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(Coral))
+                    Spacer(Modifier.width(6.dp))
+                    Text("LIVE", color = Coral, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         when (state) {
             WeatherLoadState.Loading -> Text("Loading fixtures…", color = Color.White.copy(alpha = .66f), fontSize = 15.sp)
             WeatherLoadState.Error -> Text("Fixtures unavailable · retrying", color = Coral, fontSize = 15.sp)
             WeatherLoadState.Ready -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                snapshot?.live?.let { FootballMatchSummary("LIVE · ${it.status}", it, Modifier.weight(1f), true) }
                 FootballMatchSummary("NEXT", snapshot?.next, Modifier.weight(1f))
                 FootballMatchSummary("LAST", snapshot?.previous, Modifier.weight(1f))
             }
@@ -1178,15 +1193,15 @@ private fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState,
 }
 
 @Composable
-private fun FootballMatchSummary(label: String, match: FootballMatch?, modifier: Modifier = Modifier) {
+private fun FootballMatchSummary(label: String, match: FootballMatch?, modifier: Modifier = Modifier, live: Boolean = false) {
     Column(modifier) {
-        Text(label, color = Color.White.copy(alpha = .46f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = if (live) Coral else Color.White.copy(alpha = .46f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
         Text(
             match?.let { "${it.home}  ${footballScore(it)}  ${it.away}" } ?: "No fixture",
             color = Color.White,
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
         match?.let { Text(footballSchedule(it), color = Color.White.copy(alpha = .58f), fontSize = 11.sp, maxLines = 1) }

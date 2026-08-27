@@ -130,5 +130,7 @@ class CatalogRepositoryTest {
         assertEquals("2–3", footballScore(completed))
         assertEquals("vs", footballScore(scheduled))
         assertEquals("Mon, Aug 24 · 19:00", footballSchedule(completed))
+        assertTrue(isLiveFootballStatus("67'"))
+        assertTrue(!isLiveFootballStatus("FT"))
     }
 }

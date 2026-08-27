@@ -54,8 +54,8 @@ data class MediaDetails(
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 @Immutable data class WeatherNow(val temperature: Int, val code: Int)
-@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?)
-@Immutable data class FootballSnapshot(val next: FootballMatch?, val previous: FootballMatch?)
+@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "")
+@Immutable data class FootballSnapshot(val live: FootballMatch?, val next: FootballMatch?, val previous: FootballMatch?)
 @Immutable
 data class WeatherPlace(
     val name: String,
@@ -104,21 +104,33 @@ object FootballRepository {
     private const val BASE = "https://www.thesportsdb.com/api/v1/json/123"
 
     suspend fun load(): FootballSnapshot? = coroutineScope {
+        val today = LocalDate.now()
+        val live = async { runCatching { readJson("$BASE/eventsday.php?d=$today&l=$LEAGUE").liveFootballMatch() }.getOrNull() }
         val next = async { runCatching { readJson("$BASE/eventsnextleague.php?id=$LEAGUE").firstFootballMatch() }.getOrNull() }
         val previous = async { runCatching { readJson("$BASE/eventspastleague.php?id=$LEAGUE").firstFootballMatch() }.getOrNull() }
-        FootballSnapshot(next.await(), previous.await()).takeIf { it.next != null || it.previous != null }
+        FootballSnapshot(live.await(), next.await(), previous.await()).takeIf { it.live != null || it.next != null || it.previous != null }
     }
 }
 
-internal fun JSONObject.firstFootballMatch(): FootballMatch? = optJSONArray("events")?.optJSONObject(0)?.let { event ->
-    FootballMatch(
-        home = event.optString("strHomeTeam"),
-        away = event.optString("strAwayTeam"),
-        date = event.optString("dateEventLocal").ifBlank { event.optString("dateEvent") },
-        time = event.optString("strTimeLocal").ifBlank { event.optString("strTime") }.take(5),
-        homeScore = event.optString("intHomeScore").toIntOrNull(),
-        awayScore = event.optString("intAwayScore").toIntOrNull(),
-    )
+internal fun JSONObject.firstFootballMatch(): FootballMatch? = optJSONArray("events")?.optJSONObject(0)?.footballMatch()
+
+private fun JSONObject.liveFootballMatch(): FootballMatch? = optJSONArray("events")?.let { events ->
+    (0 until events.length()).mapNotNull { events.optJSONObject(it)?.footballMatch() }.firstOrNull { isLiveFootballStatus(it.status) }
+}
+
+private fun JSONObject.footballMatch() = FootballMatch(
+    home = optString("strHomeTeam"),
+    away = optString("strAwayTeam"),
+    date = optString("dateEventLocal").ifBlank { optString("dateEvent") },
+    time = optString("strTimeLocal").ifBlank { optString("strTime") }.take(5),
+    homeScore = optString("intHomeScore").toIntOrNull(),
+    awayScore = optString("intAwayScore").toIntOrNull(),
+    status = optString("strProgress").ifBlank { optString("strStatus") },
+)
+
+internal fun isLiveFootballStatus(status: String): Boolean {
+    val value = status.trim().lowercase(Locale.ROOT)
+    return value.isNotBlank() && value !in setOf("not started", "ns", "match finished", "finished", "ft", "postponed", "cancelled", "canceled")
 }
 
 object CatalogRepository {
