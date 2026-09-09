@@ -90,3 +90,9 @@ Back from discovery returns to the dock, and Back at Home keeps the launcher ope
 ## Theater codec selection in 0.24.1
 
 Removed the unconditional AV1-blocking script from the embedded YouTube player. WebView now reports its native codec support, leaving adaptive quality selection to YouTube. This removes an app-imposed restriction; it does not force the highest resolution or guarantee an increase in quality. YouTube no longer supports programmatically setting embedded-player quality through its public API. No quality polling, extra player, or dependency was added.
+
+## Remote navigation fix in 0.24.2
+
+Hero Down now returns to the last focused dock item, including Search, Hidden, and Settings. It brings that item into view before requesting focus, so scrolling to the right end of a lazy row cannot leave the hero pointing to a disposed first app. App identity is retained across reordering, with a safe fallback after removal. Moving up from movie rows preserves the dock position; moving down again restores the previous first-row movie position.
+
+Run `python3 scripts/check-tv-navigation.py SERIAL` with `adb` on PATH and movie Home enabled to check repeated far-right dock/movie round trips.

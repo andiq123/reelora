@@ -120,3 +120,11 @@ The player previously replaced `MediaSource.isTypeSupported` to reject every AV1
 Actual resolution, hardware decoding, and CPU use still require playback testing on the target TV and WebView version; this change is not evidence that every stream now plays at its maximum resolution.
 
 Validation: all 23 unit tests, lint, and minified release compilation passed. No maximum-resolution or physical-device codec-performance claim was verified in this pass. The local 0.24.1 APK is debug-signed. Nothing was pushed or published.
+
+## 0.24.2 navigation correction
+
+The hero's Down focus link targeted the first app, which a LazyRow disposes when scrolled far enough right. Replaced it with a cancellable scroll-then-focus action and an entry focus requester attached to the remembered dock item. The entry uses app identity (or the Search/Hidden/Settings action key), not a stale numeric position; missing apps fall back to the first available entry. Movie-to-dock navigation preserves the dock position and dock-to-movie navigation retains the previous first-row movie index. Removed the unused per-app focus requesters.
+
+A unit regression covers reordered/removed apps and all dock actions, including an empty app list. `scripts/check-tv-navigation.py` drives a real TV remote sequence across the rightmost action, last installed app, and last movie, with repeated hero round trips. All 24 unit tests, lint, and release compilation passed.
+
+On-device result: all repeated round trips passed on Andi TV (onn. 4K Plus Streaming), including Settings, the last installed app (OttPlayer), and the last first-row movie (Supergirl). The local release was installed in place as version 0.24.2, build 58.

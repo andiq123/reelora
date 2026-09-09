@@ -799,6 +799,13 @@ private fun installedTvApps(context: Context): List<LauncherApp> {
         .sortedBy { it.name.lowercase() }
 }
 
+internal fun dockEntryIndex(appKeys: List<String>, key: String?): Int = when (key) {
+    "search" -> appKeys.size
+    "hidden" -> appKeys.size + 1
+    "settings" -> appKeys.size + 2
+    else -> appKeys.indexOf(key).coerceAtLeast(0)
+}
+
 private fun launcherAppKey(app: LauncherApp) = app.component.flattenToShortString()
 
 private fun orderLauncherApps(apps: List<LauncherApp>, savedOrder: List<String>): List<LauncherApp> {
@@ -1085,6 +1092,8 @@ private fun Home(
     val sections = remember(catalog) { launcherMovieSections(catalog) }
     val movieRowFocus = remember(sections) { sections.map { section -> List(section.items.size) { FocusRequester() } } }
     val movieRowState = remember(sections) { sections.map { LazyListState() } }
+    val appKeys = remember(apps) { apps.map(::launcherAppKey) }
+    var lastAppKey by remember { mutableStateOf<String?>(null) }
     var lastFirstMovieIndex by remember { mutableStateOf(0) }
     var navigationJob by remember { mutableStateOf<Job?>(null) }
     fun focusMovie(row: Int, item: Int) {
@@ -1102,7 +1111,8 @@ private fun Home(
         navigationJob?.cancel()
         navigationJob = scope.launch {
             listState.scrollToItem(0)
-            appListState.scrollToItem(0)
+            val target = dockEntryIndex(appKeys, lastAppKey)
+            if (appListState.layoutInfo.visibleItemsInfo.none { it.index == target }) appListState.scrollToItem(target)
             withFrameNanos { }
             appFocus.requestFocus()
         }
@@ -1161,7 +1171,12 @@ private fun Home(
                     if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
                     hero?.let { shown -> ActionButton(
                         "Explore",
-                        Modifier.focusRequester(heroFocus).focusProperties { down = appFocus },
+                        Modifier.focusRequester(heroFocus).onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                                focusApps()
+                                true
+                            } else false
+                        },
                         icon = Icons.Default.Info,
                     ) { onSelect(shown) } }
                 },
@@ -1171,7 +1186,8 @@ private fun Home(
                         apps, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
                         FocusRequester.Default,
                         focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onHiddenApps, onSettings,
-                        onRowFocused = {},
+                        onRowFocused = { lastAppKey = it },
+                        entryKey = lastAppKey,
                         onSearch = onSearch,
                         onDown = if (sections.size > 1) ({ focusMovie(1, lastFirstMovieIndex) }) else null,
                     )
@@ -1417,11 +1433,14 @@ private fun AppDock(
     onMoveDone: () -> Unit,
     onHiddenApps: () -> Unit,
     onSettings: () -> Unit,
-    onRowFocused: (FocusRequester) -> Unit,
+    onRowFocused: (String) -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
     onDown: (() -> Unit)? = null,
+    entryKey: String? = null,
 ) {
+    val appKeys = remember(apps) { apps.map(::launcherAppKey) }
+    val entry = dockEntryIndex(appKeys, entryKey)
     val scope = rememberCoroutineScope()
     var moveJob by remember { mutableStateOf<Job?>(null) }
     val returnFocus = remember { FocusRequester() }
@@ -1456,7 +1475,6 @@ private fun AppDock(
                 key = { _, app -> app.component.flattenToShortString() },
                 contentType = { _, _ -> "app" },
             ) { index, app ->
-                val itemFocus = remember { FocusRequester() }
                 AppCard(
                     app,
                     focusLift,
@@ -1474,36 +1492,34 @@ private fun AppDock(
                         }
                     },
                     onMoveDone = onMoveDone,
-                    onFocused = { onRowFocused(itemFocus) },
+                    onFocused = { onRowFocused(launcherAppKey(app)) },
                     modifier = Modifier.animateItem(fadeInSpec = tween(120), placementSpec = tween(150), fadeOutSpec = tween(90))
-                        .then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                        .then(if (index == entry) Modifier.focusRequester(firstFocus) else Modifier)
                         .then(if (launcherAppKey(app) == dockFocusKey) Modifier.focusRequester(returnFocus) else Modifier)
-                        .focusRequester(itemFocus)
                         .focusProperties { up = upFocus; down = downFocus },
                 )
             }
             item(key = "search", contentType = "action") {
                 ShelfActionCard(
                     "Search", Icons.Default.Search, focusLift, showLabels, onSearch,
-                    Modifier.focusProperties { up = upFocus; down = downFocus },
+                    Modifier.then(if (entry == apps.size) Modifier.focusRequester(firstFocus) else Modifier)
+                        .focusProperties { up = upFocus; down = downFocus },
+                    onFocused = { onRowFocused("search") },
                 )
             }
             item(key = "hidden") {
-                val shelfFocus = remember { FocusRequester() }
-                val itemFocus = if (apps.isEmpty()) firstFocus else shelfFocus
                 ShelfActionCard(
                     "Hidden", Icons.Default.Delete, focusLift, showLabels, onHiddenApps,
                     Modifier.then(if (dockFocusKey == "hidden") Modifier.focusRequester(returnFocus) else Modifier)
-                        .focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
-                    onFocused = { onRowFocused(itemFocus) },
+                        .then(if (entry == apps.size + 1) Modifier.focusRequester(firstFocus) else Modifier).focusProperties { up = upFocus; down = downFocus },
+                    onFocused = { onRowFocused("hidden") },
                 )
             }
             item(key = "settings") {
-                val itemFocus = remember { FocusRequester() }
                 ShelfActionCard(
                     "Settings", Icons.Default.Settings, focusLift, showLabels, onSettings,
-                    Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
-                    onFocused = { onRowFocused(itemFocus) },
+                    Modifier.then(if (entry == apps.size + 2) Modifier.focusRequester(firstFocus) else Modifier).focusProperties { up = upFocus; down = downFocus },
+                    onFocused = { onRowFocused("settings") },
                 )
             }
         }
