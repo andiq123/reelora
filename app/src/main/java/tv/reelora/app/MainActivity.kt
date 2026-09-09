@@ -2,6 +2,9 @@ package tv.reelora.app
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.os.Build
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -18,11 +21,12 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.activity.compose.ReportDrawnWhen
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -31,11 +35,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -60,14 +59,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -85,8 +82,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -115,8 +115,10 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -139,8 +141,10 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme
 import coil3.compose.AsyncImage
-import coil3.imageLoader
+import coil3.request.crossfade
 import coil3.request.ImageRequest
+import kotlinx.coroutines.Job
+import android.os.SystemClock
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -156,15 +160,31 @@ private val Background = Color(0xFF080A0F)
 private val Surface = Color(0xFF171A22)
 private val Violet = Color(0xFF8DA2FF)
 private val Coral = Color(0xFFFFB56B)
-private val PanelBrush = Brush.verticalGradient(listOf(Color(0xF21D2029), Color(0xF20F1117)))
+private val PanelBrush = Brush.verticalGradient(listOf(Color(0xF2181C24), Color(0xF211141B)))
 private val DialogShape = RoundedCornerShape(28.dp)
-private val ControlShape = RoundedCornerShape(14.dp)
+private val ControlShape = RoundedCornerShape(12.dp)
 private val Gap = 12.dp
 private val GapLarge = 24.dp
 private val DialogPadding = 28.dp
 private val LocalRomanian = staticCompositionLocalOf { false }
+private val LocalDialogReady = staticCompositionLocalOf { false }
+private val LocalForeground = staticCompositionLocalOf { true }
 
 private val RomanianUi = mapOf(
+    "Loading discovery…" to "Se încarcă recomandările…", "Discovery unavailable · your apps are ready" to "Recomandări indisponibile · aplicațiile sunt gata",
+    "Not rated" to "Fără evaluare", "Retry" to "Reîncearcă", "All your apps are on Home" to "Toate aplicațiile sunt pe Acasă", "Clear" to "Șterge",
+    "Ambient trailers after a quiet moment" to "Trailere după o perioadă de inactivitate",
+    "Hold an app to move, rename or hide it" to "Ține apăsat pe o aplicație pentru a o muta, redenumi sau ascunde",
+    "Find your next movie" to "Găsește următorul film", "Search unavailable · try again" to "Căutare indisponibilă · încearcă din nou",
+    "Check your connection and search again" to "Verifică conexiunea și caută din nou", "Try a different title" to "Încearcă alt titlu",
+    "Search movies, series and animation" to "Caută filme, seriale și animație",
+    "Check for updates" to "Caută actualizări", "Checking…" to "Se verifică…",
+    "Downloading…" to "Se descarcă…", "Install update" to "Instalează",
+    "You're up to date" to "Ai ultima versiune", "Allow installation to continue" to "Permite instalarea pentru a continua",
+    "Update check failed · try again" to "Verificarea a eșuat · încearcă din nou",
+    "Update could not be verified · try again" to "Actualizarea nu poate fi instalată · verifică conexiunea și versiunea",
+    "Discover" to "Descoperă", "Explore" to "Explorează", "YOUR APPS" to "APLICAȚIILE TALE",
+    "Your apps, ready" to "Aplicațiile tale sunt gata",
     "Settings" to "Setări", "A quiet home for apps and discovery" to "Un spațiu calm pentru aplicații și descoperire",
     "APP SHELF" to "APLICAȚII", "Find and manage Home apps" to "Găsește și organizează aplicațiile",
     "HOME" to "ACASĂ", "Featured movies or a calm wallpaper" to "Filme recomandate sau un fundal calm",
@@ -183,6 +203,7 @@ private val RomanianUi = mapOf(
     "App name" to "Numele aplicației", "Reset" to "Resetează", "Cancel" to "Anulează", "Save" to "Salvează",
     "Hidden apps" to "Aplicații ascunse", "Open an app or return it to Home" to "Deschide sau readaugă o aplicație pe Acasă",
     "Hidden from Home" to "Ascunsă de pe Acasă", "Open" to "Deschide", "Show on Home" to "Arată pe Acasă",
+    "Restore anytime from Hidden apps" to "Restabilește oricând din Aplicații ascunse",
     "No hidden apps" to "Nu există aplicații ascunse", "Weather location" to "Locația meteo",
     "Search, choose, then confirm" to "Caută, alege, apoi confirmă", "City" to "Oraș", "Searching…" to "Se caută…",
     "Choose the correct location" to "Alege locația corectă", "No locations found" to "Nu s-au găsit locații",
@@ -232,19 +253,6 @@ private val RowBringIntoViewSpec = object : BringIntoViewSpec {
     }
 }
 
-private fun Modifier.activeTransform(
-    scale: Float,
-    translationY: Float = 0f,
-    translationX: Float = 0f,
-    alpha: Float = 1f,
-) = if (scale == 1f && translationY == 0f && translationX == 0f && alpha == 1f) this else graphicsLayer {
-    scaleX = scale
-    scaleY = scale
-    this.translationY = translationY
-    this.translationX = translationX
-    this.alpha = alpha
-}
-
 private data class TheaterFeature(val item: MediaItem, val trailer: Trailer)
 internal enum class WeatherLoadState { Loading, Ready, Error }
 @Immutable
@@ -255,9 +263,26 @@ private data class LauncherApp(
     val banner: android.graphics.drawable.Drawable?,
 )
 
+// App-icon launches enter the same Home task without constructing a second Compose tree.
+class LauncherEntryActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            .setClass(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        finish()
+    }
+}
+
 class MainActivity : ComponentActivity() {
     private val inputEvents = Channel<Unit>(Channel.CONFLATED)
+    private lateinit var updater: AppUpdater
     private val foreground = MutableStateFlow(false)
+    private val appRevision = MutableStateFlow(0)
+    private val packageChanges = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            appRevision.value += 1
+        }
+    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         inputEvents.trySend(Unit)
@@ -266,26 +291,47 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ReeloraApp(inputEvents, foreground) }
+        updater = AppUpdater(this)
+        val packageFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(packageChanges, packageFilter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(packageChanges, packageFilter)
+        setContent { ReeloraApp(inputEvents, foreground, appRevision, updater) }
     }
 
     override fun onResume() {
         super.onResume()
         foreground.value = true
+        updater.resume()
     }
 
     override fun onPause() {
         foreground.value = false
+        updater.pause()
         super.onPause()
     }
+    override fun onDestroy() {
+        updater.close()
+        unregisterReceiver(packageChanges)
+        inputEvents.close()
+        super.onDestroy()
+    }
+
 }
 
 @Composable
-private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<Boolean>) {
+private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<Boolean>, appRevision: MutableStateFlow<Int>, updater: AppUpdater) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
     var romanian by remember { mutableStateOf(preferences.getBoolean("romanian", false)) }
-    CompositionLocalProvider(LocalRomanian provides romanian) { MaterialTheme(
+    val isForeground by foreground.collectAsState()
+    val updateStatus by updater.status.collectAsState()
+    CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground) { MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Violet,
             secondary = Coral,
@@ -295,23 +341,28 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             onSurface = Color.White,
         )
     ) {
-        var result by remember { mutableStateOf<CatalogResult?>(null) }
+        var result by remember { mutableStateOf(CatalogRepository.freshCatalog()) }
         var apps by remember { mutableStateOf(emptyList<LauncherApp>()) }
+        var loadedRevision by remember { mutableStateOf(-1) }
+        val appsReady = loadedRevision >= 0
+        ReportDrawnWhen { appsReady }
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
+        var searchFromSettings by remember { mutableStateOf(false) }
+        var hiddenFromSettings by remember { mutableStateOf(false) }
+        var settingsSection by remember { mutableStateOf(0) }
         var settingsOpen by remember { mutableStateOf(false) }
         var weatherLocationOpen by remember { mutableStateOf(false) }
         var hiddenAppsOpen by remember { mutableStateOf(false) }
         var configuredApp by remember { mutableStateOf<LauncherApp?>(null) }
         var editingApp by remember { mutableStateOf<LauncherApp?>(null) }
         var movingAppKey by remember { mutableStateOf<String?>(null) }
-        var moveConfirmReady by remember { mutableStateOf(false) }
+        var dockFocusKey by remember { mutableStateOf<String?>(null) }
         var theater by remember { mutableStateOf<TheaterFeature?>(null) }
         var theaterReturn by remember { mutableStateOf<MediaItem?>(null) }
         var recentTheater by remember { mutableStateOf(emptyList<String>()) }
         var theaterOpen by remember { mutableStateOf(false) }
-        val isForeground by foreground.collectAsState()
-        var theaterEnabled by remember { mutableStateOf(preferences.getBoolean("theaterEnabled", true)) }
+        var theaterEnabled by remember { mutableStateOf(preferences.getBoolean("theaterEnabled", false)) }
         var idleMinutes by remember {
             mutableStateOf(preferences.getInt("idleMinutes", 3).takeIf { it in THEATER_IDLE_OPTIONS } ?: 3)
         }
@@ -391,39 +442,46 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 theaterReturn = null
             }
         }
-        LaunchedEffect(Unit) {
+        LaunchedEffect(isForeground, moviesEnabled, searching, appsReady) {
+            if (!isForeground || !appsReady || (!moviesEnabled && !searching)) return@LaunchedEffect
+            withFrameNanos { }
+            delay(750)
             var retryDelay = 10_000L
             while (true) {
                 val loaded = CatalogRepository.load()
                 result = loaded
-                if (!loaded.isDemo || !CatalogRepository.configured) break
-                delay(retryDelay)
+                if (!CatalogRepository.configured) break
+                val untilMidnight = java.time.Duration.between(java.time.LocalDateTime.now(), LocalDate.now().plusDays(1).atStartOfDay()).toMillis().coerceAtLeast(1_000L)
+                delay(if (loaded.isDemo) retryDelay else minOf(6 * 60 * 60_000L, untilMidnight))
                 retryDelay = nextCatalogRetryDelay(retryDelay)
             }
         }
+        var weatherRefreshAt by remember(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude) { mutableStateOf(0L) }
         LaunchedEffect(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude) {
             weather = null
             weatherState = WeatherLoadState.Loading
+        }
+        LaunchedEffect(isForeground, weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude, appsReady) {
+            if (!isForeground || !appsReady) return@LaunchedEffect
+            withFrameNanos { }
+            delay(750)
             while (true) {
+                delay((weatherRefreshAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
                 val latest = WeatherRepository.current(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude)
                 if (latest == null) weatherState = WeatherLoadState.Error else {
                     weather = latest
                     weatherState = WeatherLoadState.Ready
                 }
-                delay(if (latest == null) 60_000L else 30 * 60_000L)
+                weatherRefreshAt = SystemClock.elapsedRealtime() + if (latest == null) 60_000L else 30 * 60_000L
             }
         }
-        LaunchedEffect(isForeground) {
-            if (isForeground) apps = withContext(Dispatchers.IO) { installedTvApps(context) }
-        }
-        LaunchedEffect(movingAppKey) {
-            moveConfirmReady = false
-            if (movingAppKey != null) {
-                delay(300)
-                moveConfirmReady = true
+        val revision by appRevision.collectAsState()
+        LaunchedEffect(isForeground, revision) {
+            if (isForeground && revision != loadedRevision) {
+                apps = withContext(Dispatchers.IO) { installedTvApps(context) }
+                loadedRevision = revision
             }
         }
-
         LaunchedEffect(theater?.trailer?.key) {
             val feature = theater ?: return@LaunchedEffect
             val intent = Intent(context, TrailerActivity::class.java)
@@ -449,13 +507,13 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 wasPlaying
             },
         ) {
-            val catalog = result ?: if (!moviesEnabled) CatalogResult(emptyList(), isDemo = true) else null
-            if (catalog == null) {
-                Loading()
-            } else {
+            val catalog = result ?: remember { CatalogResult(emptyList(), isDemo = true) }
+            run {
                 if (moviesEnabled) {
                     Home(
                         catalog,
+                        loading = result == null,
+                        active = isForeground && !searching && !settingsOpen && selected == null && !weatherLocationOpen && !hiddenAppsOpen && configuredApp == null && editingApp == null,
                         apps = visibleApps,
                         weather = weather,
                         weatherState = weatherState,
@@ -463,15 +521,15 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         focusLift = focusLift,
                         showAppLabels = showAppLabels,
                         onLaunch = ::launchApp,
-                        onSearch = { searching = true },
-                        onSettings = { settingsOpen = true },
-                        onHiddenApps = { hiddenAppsOpen = true },
-                        onConfigureApp = { configuredApp = it },
+                        onSearch = { dockFocusKey = null; searchFromSettings = false; searching = true },
+                        onSettings = { dockFocusKey = null; settingsOpen = true },
+                        onHiddenApps = { dockFocusKey = null; hiddenFromSettings = false; hiddenAppsOpen = true },
+                        onConfigureApp = { dockFocusKey = launcherAppKey(it); configuredApp = it },
                         movingAppKey = movingAppKey,
-                        moveConfirmReady = moveConfirmReady,
+                        dockFocusKey = if (searching || settingsOpen || selected != null || weatherLocationOpen || hiddenAppsOpen || configuredApp != null || editingApp != null) null else dockFocusKey,
                         onMoveApp = ::moveVisibleApp,
                         onMoveDone = { movingAppKey = null },
-                        onSelect = { selected = it },
+                        onSelect = { dockFocusKey = null; selected = it },
                     )
                 } else {
                     AppsOnlyHome(
@@ -484,31 +542,30 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         wallpaperSeed = wallpaperSeed,
                         footballWidgetEnabled = footballWidgetEnabled,
                         onLaunch = ::launchApp,
-                        onSettings = { settingsOpen = true },
-                        onHiddenApps = { hiddenAppsOpen = true },
-                        onConfigureApp = { configuredApp = it },
+                        onSearch = { dockFocusKey = null; searchFromSettings = false; searching = true },
+                        onSettings = { dockFocusKey = null; settingsOpen = true },
+                        onHiddenApps = { dockFocusKey = null; hiddenFromSettings = false; hiddenAppsOpen = true },
+                        onConfigureApp = { dockFocusKey = launcherAppKey(it); configuredApp = it },
                         movingAppKey = movingAppKey,
-                        moveConfirmReady = moveConfirmReady,
+                        dockFocusKey = if (searching || settingsOpen || selected != null || weatherLocationOpen || hiddenAppsOpen || configuredApp != null || editingApp != null) null else dockFocusKey,
                         onMoveApp = ::moveVisibleApp,
                         onMoveDone = { movingAppKey = null },
                     )
                 }
                 if (searching) {
                     SearchDialog(
-                        suggestions = catalog.sections.first().items.take(10),
-                        onDismiss = { searching = false },
-                        onSelect = {
-                            searching = false
-                            selected = it
-                        },
+                        visible = selected == null,
+                        suggestions = catalog.sections.firstOrNull()?.items.orEmpty().take(10),
+                        onDismiss = { searching = false; settingsOpen = searchFromSettings; searchFromSettings = false },
+                        onSelect = { dockFocusKey = null; selected = it },
                     )
                 }
                 selected?.let { item ->
                     DetailsDialog(
                         item = item,
-                        similar = catalog.sections.flatMap { it.items }.distinctBy { it.id }.filter { it.id != item.id }.take(5),
+                        similar = catalog.sections.flatMap { it.items }.distinctBy(::mediaKey).filter { mediaKey(it) != mediaKey(item) }.take(5),
                         onDismiss = { selected = null },
-                        onSelect = { selected = it },
+                        onSelect = { dockFocusKey = null; selected = it },
                         onPlayTrailer = { trailer ->
                             theaterReturn = item
                             theater = TheaterFeature(item, trailer)
@@ -518,6 +575,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     )
                 }
                 if (settingsOpen) SettingsDialog(
+                    section = settingsSection,
+                    onSectionChange = { settingsSection = it },
+                    updateStatus = updateStatus,
+                    onUpdate = updater::check,
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
                     focusLift = focusLift,
@@ -531,6 +592,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     hiddenAppCount = orderedApps.count { launcherAppKey(it) in hiddenApps },
                     onSearch = {
                         settingsOpen = false
+                        searchFromSettings = true
                         searching = true
                     },
                     onTheaterEnabled = {
@@ -582,6 +644,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     },
                     onHiddenApps = {
                         settingsOpen = false
+                        hiddenFromSettings = true
                         hiddenAppsOpen = true
                     },
                     onSystemSettings = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) },
@@ -615,10 +678,11 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onLaunch = ::launchApp,
                     onRestore = { app ->
                         val key = launcherAppKey(app)
+                        dockFocusKey = key
                         hiddenApps = hiddenApps - key
                         preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
                     },
-                    onDismiss = { hiddenAppsOpen = false },
+                    onDismiss = { hiddenAppsOpen = false; settingsOpen = hiddenFromSettings; hiddenFromSettings = false },
                 )
                 configuredApp?.let { app ->
                     AppOptionsDialog(
@@ -639,6 +703,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         },
                         onHide = {
                             val key = launcherAppKey(app)
+                            val index = visibleApps.indexOfFirst { launcherAppKey(it) == key }
+                            dockFocusKey = visibleApps.getOrNull(index + 1)?.let(::launcherAppKey)
+                                ?: visibleApps.getOrNull(index - 1)?.let(::launcherAppKey) ?: "hidden"
                             hiddenApps = hiddenApps + key
                             preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
                             configuredApp = null
@@ -661,15 +728,16 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                             preferences.edit().remove("customName:$key").apply()
                             editingApp = null
                         },
-                        onDismiss = { editingApp = null },
+                        onDismiss = { editingApp = null; configuredApp = app },
                     )
                 }
             }
         }
 
-        LaunchedEffect(result, theater, theaterEnabled, idleMinutes, isForeground, moviesEnabled) {
+        val overlayOpen = searching || settingsOpen || weatherLocationOpen || hiddenAppsOpen || selected != null || configuredApp != null || editingApp != null || movingAppKey != null
+        LaunchedEffect(result, theater, theaterEnabled, idleMinutes, isForeground, moviesEnabled, overlayOpen) {
             val catalog = result ?: return@LaunchedEffect
-            if (theater != null || !theaterEnabled || !isForeground || !moviesEnabled) return@LaunchedEffect
+            if (theater != null || !theaterEnabled || !isForeground || !moviesEnabled || overlayOpen) return@LaunchedEffect
             while (withTimeoutOrNull(idleMinutes * 60_000L) { inputEvents.receive() } != null) {}
             findTheaterFeature(
                 launcherMovieSections(catalog).flatMap { it.items },
@@ -720,13 +788,13 @@ private fun installedTvApps(context: Context): List<LauncherApp> {
     return intents.flatMap { manager.queryIntentActivities(it, 0) }
         .filter { it.activityInfo.packageName != context.packageName }
         .distinctBy { it.activityInfo.packageName }
-        .map {
-            LauncherApp(
+        .mapNotNull {
+            runCatching { LauncherApp(
                 it.loadLabel(manager).toString(),
                 ComponentName(it.activityInfo.packageName, it.activityInfo.name),
                 it.loadIcon(manager),
                 it.activityInfo.loadBanner(manager) ?: it.activityInfo.applicationInfo.loadBanner(manager),
-            )
+            ) }.getOrNull()
         }
         .sortedBy { it.name.lowercase() }
 }
@@ -792,13 +860,6 @@ class TrailerActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
-                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                    view.evaluateJavascript(
-                        "MediaSource.isTypeSupported=(f=>t=>/av01|av1/i.test(t)?false:f(t))(MediaSource.isTypeSupported.bind(MediaSource))",
-                        null,
-                    )
-                }
-
                 override fun onPageFinished(view: WebView, url: String) {
                     view.evaluateJavascript(
                         """(()=>{if(window.reeloraWatching)return;window.reeloraWatching=true;let started=false;document.addEventListener('playing',()=>started=true,true);let timer=setInterval(()=>{let video=document.querySelector('video');if(video){clearInterval(timer);video.addEventListener('ended',()=>{if(!document.querySelector('.ad-showing'))Reelora.onEnded()})}},500);setTimeout(()=>{let video=document.querySelector('video');if(!started&&!(video&&video.currentTime>0))Reelora.onUnavailable()},15000)})()""",
@@ -911,21 +972,25 @@ class TrailerActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        player.onResume()
+        player.resumeTimers()
+    }
+
+    override fun onPause() {
+        player.evaluateJavascript("document.querySelectorAll('video').forEach(v=>v.pause())", null)
+        player.onPause()
+        player.pauseTimers()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         player.stopLoading()
+        (player.parent as? android.view.ViewGroup)?.removeView(player)
+        player.removeJavascriptInterface("Reelora")
         player.destroy()
         super.onDestroy()
-    }
-}
-
-@Composable
-private fun Loading() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Image(
-            painterResource(R.drawable.reelora_mark),
-            "Reelora TV",
-            Modifier.size(88.dp).graphicsLayer { alpha = .82f },
-        )
     }
 }
 
@@ -986,13 +1051,15 @@ private fun LoadingCastRow() {
 @Composable
 private fun artworkModel(url: String): ImageRequest {
     val context = LocalContext.current
-    return remember(url) { ImageRequest.Builder(context).data(url).build() }
+    return remember(context, url) { ImageRequest.Builder(context).data(url).build() }
 }
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun Home(
     catalog: CatalogResult,
+    loading: Boolean,
+    active: Boolean,
     apps: List<LauncherApp>,
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
@@ -1005,40 +1072,42 @@ private fun Home(
     onHiddenApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
-    moveConfirmReady: Boolean,
+    dockFocusKey: String?,
     onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
-    val listState = rememberScrollState()
+    val listState = rememberLazyListState()
     val appListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val density = LocalDensity.current
-    val stageScroll = remember(density) { with(density) { 548.dp.roundToPx() } }
-    val rowStep = remember(density) { with(density) { 200.dp.roundToPx() } }
     val heroFocus = remember { FocusRequester() }
     val appFocus = remember { FocusRequester() }
-    var lastAppRowFocus by remember { mutableStateOf<FocusRequester?>(null) }
     val sections = remember(catalog) { launcherMovieSections(catalog) }
     val movieRowFocus = remember(sections) { sections.map { section -> List(section.items.size) { FocusRequester() } } }
     val movieRowState = remember(sections) { sections.map { LazyListState() } }
-    var lastFirstMovieFocus by remember { mutableStateOf<FocusRequester?>(null) }
+    var lastFirstMovieIndex by remember { mutableStateOf(0) }
+    var navigationJob by remember { mutableStateOf<Job?>(null) }
     fun focusMovie(row: Int, item: Int) {
+        if (row !in movieRowFocus.indices) return
         val target = adjacentRowIndex(item, movieRowFocus[row].size)
-        scope.launch {
+        navigationJob?.cancel()
+        navigationJob = scope.launch {
+            listState.scrollToItem(row)
             movieRowState[row].scrollToItem((target - 2).coerceAtLeast(0))
-            delay(16)
+            withFrameNanos { }
             movieRowFocus[row][target].requestFocus()
         }
     }
     fun focusApps() {
-        val target = lastAppRowFocus ?: appFocus
-        scope.launch {
-            listState.animateScrollTo(0, tween(300, easing = FastOutSlowInEasing))
-            target.requestFocus()
+        navigationJob?.cancel()
+        navigationJob = scope.launch {
+            listState.scrollToItem(0)
+            appListState.scrollToItem(0)
+            withFrameNanos { }
+            appFocus.requestFocus()
         }
     }
+    BackHandler(enabled = active && movingAppKey == null) { focusApps() }
     val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
@@ -1050,31 +1119,30 @@ private fun Home(
             }
         }
     }
-    val featured = sections.first()
-    var hero by remember(featured) { mutableStateOf(featured.items.first()) }
-    var recent by remember(featured) { mutableStateOf(listOf(mediaKey(hero))) }
+    val featured = sections.firstOrNull()
+    var hero by remember(featured) { mutableStateOf(featured?.items?.firstOrNull()) }
+    var recent by remember(featured) { mutableStateOf(hero?.let { listOf(mediaKey(it)) }.orEmpty()) }
+    var initiallyFocused by remember { mutableStateOf(false) }
     LaunchedEffect(installedAppKeys) {
-        listState.scrollTo(0)
-        appListState.scrollToItem(0)
-        delay(160)
-        if (apps.isEmpty()) heroFocus.requestFocus() else appFocus.requestFocus()
+        if (initiallyFocused) return@LaunchedEffect
+        withFrameNanos { }
+        appFocus.requestFocus()
+        initiallyFocused = apps.isNotEmpty()
     }
-    LaunchedEffect(hero, featured) {
-        launch { CatalogRepository.details(hero) }
-        val next = nextDiscoveryItem(featured.items, recent)
-        next?.backdropUrl?.let { url ->
-            context.imageLoader.enqueue(ImageRequest.Builder(context).data(url).size(1920, 720).build())
-        }
-        delay(10_000)
-        next?.let {
+    val stageVisible by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    LaunchedEffect(hero, featured, active, stageVisible) {
+        if (!active || !stageVisible) return@LaunchedEffect
+        delay(20_000)
+        nextDiscoveryItem(featured?.items.orEmpty(), recent)?.let {
             hero = it
             recent = (recent + mediaKey(it)).takeLast(10)
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides stableBringIntoView) {
-        Column(
+        LazyColumn(
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(30.dp),
-            modifier = Modifier.fillMaxSize().verticalScroll(listState).padding(bottom = 48.dp).onPreviewKeyEvent { event ->
+            modifier = Modifier.fillMaxSize().onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.Menu -> { onSettings(); true }
@@ -1083,27 +1151,33 @@ private fun Home(
                 }
             },
         ) {
-            LauncherStage(
+            item(key = "stage", contentType = "stage") { LauncherStage(
                 hero,
                 weather,
                 weatherState,
                 use24HourClock,
+                modifier = Modifier.fillParentMaxHeight(),
+                heroAction = {
+                    if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                    hero?.let { shown -> ActionButton(
+                        "Explore",
+                        Modifier.focusRequester(heroFocus).focusProperties { down = appFocus },
+                        icon = Icons.Default.Info,
+                    ) { onSelect(shown) } }
+                },
             ) {
-                ActionButton(
-                    "View",
-                    Modifier.align(Alignment.TopStart).padding(start = 66.dp, top = 224.dp)
-                        .focusRequester(heroFocus).focusProperties { down = appFocus },
-                ) { onSelect(hero) }
                 Column(Modifier.align(Alignment.BottomStart).padding(bottom = 24.dp)) {
                     AppDock(
-                        apps, appListState, heroFocus, appFocus,
-                        lastFirstMovieFocus ?: movieRowFocus.getOrNull(1)?.firstOrNull() ?: heroFocus,
-                        focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, moveConfirmReady, onMoveApp, onMoveDone, onHiddenApps, onSettings,
-                        onRowFocused = { lastAppRowFocus = it },
+                        apps, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
+                        FocusRequester.Default,
+                        focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onHiddenApps, onSettings,
+                        onRowFocused = {},
+                        onSearch = onSearch,
+                        onDown = if (sections.size > 1) ({ focusMovie(1, lastFirstMovieIndex) }) else null,
                     )
                 }
-            }
-            sections.drop(1).forEachIndexed { visibleIndex, section ->
+            } }
+            itemsIndexed(sections.drop(1), key = { _, section -> section.title }, contentType = { _, _ -> "movie-row" }) { visibleIndex, section ->
                 val index = visibleIndex + 1
                 MediaRow(
                     section,
@@ -1117,23 +1191,19 @@ private fun Home(
                     },
                     onDown = if (index < sections.lastIndex) ({ itemIndex -> focusMovie(index + 1, itemIndex) }) else null,
                     onItemFocused = { itemIndex ->
-                        if (index == 1) lastFirstMovieFocus = movieRowFocus[index][itemIndex]
-                        scope.launch {
-                            delay(16)
-                            listState.animateScrollTo(
-                                stageScroll + (index - 1) * rowStep,
-                                tween(300, easing = FastOutSlowInEasing),
-                            )
+                        if (index == 1) lastFirstMovieIndex = itemIndex
+                        if (listState.firstVisibleItemIndex != index) scope.launch {
+                            listState.animateScrollToItem(index)
                         }
                     },
                 )
             }
-            Text(
+            item(key = "attribution", contentType = "footer") { Text(
                 tr("Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo"),
                 color = Color.White.copy(alpha = .38f),
                 fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 48.dp),
-            )
+                modifier = Modifier.padding(horizontal = 48.dp).padding(bottom = 48.dp),
+            ) }
         }
     }
 }
@@ -1149,11 +1219,12 @@ private fun AppsOnlyHome(
     wallpaperSeed: Int,
     footballWidgetEnabled: Boolean,
     onLaunch: (LauncherApp) -> Unit,
+    onSearch: () -> Unit,
     onSettings: () -> Unit,
     onHiddenApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
-    moveConfirmReady: Boolean,
+    dockFocusKey: String?,
     onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
 ) {
@@ -1165,42 +1236,44 @@ private fun AppsOnlyHome(
     val wallpaper = remember(wallpaperSeed) {
         "https://picsum.photos/seed/reelora-${LocalDate.now().toEpochDay() + wallpaperSeed}/1920/1080"
     }
-    val ambient = rememberInfiniteTransition(label = "wallpaper drift")
-    val scale by ambient.animateFloat(
-        1.01f,
-        1.045f,
-        infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "wallpaper zoom",
-    )
+    var initiallyFocused by remember { mutableStateOf(false) }
+    BackHandler(enabled = movingAppKey == null) { }
     LaunchedEffect(installedAppKeys) {
-        appListState.scrollToItem(0)
-        delay(160)
+        if (initiallyFocused) return@LaunchedEffect
+        withFrameNanos { }
         appFocus.requestFocus()
+        initiallyFocused = apps.isNotEmpty()
     }
-    LaunchedEffect(footballWidgetEnabled) {
-        if (!footballWidgetEnabled) return@LaunchedEffect
+    val isForeground = LocalForeground.current
+    var footballRefreshAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(footballWidgetEnabled, isForeground) {
+        if (!footballWidgetEnabled || !isForeground) return@LaunchedEffect
+        withFrameNanos { }
+        delay(750)
         while (true) {
-            footballState = WeatherLoadState.Loading
-            football = FootballRepository.load()
+            delay((footballRefreshAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+            val latest = FootballRepository.load()
+            if (latest != null) football = latest
             footballState = if (football == null) WeatherLoadState.Error else WeatherLoadState.Ready
-            delay(if (football == null) 60_000L else 2 * 60_000L)
+            footballRefreshAt = SystemClock.elapsedRealtime() + if (latest == null) 60_000L else 2 * 60_000L
         }
     }
     Box(
         Modifier.fillMaxSize().clipToBounds().background(Background).onPreviewKeyEvent { event ->
-            if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
-                onSettings()
-                true
-            } else false
+            if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                Key.Menu -> { onSettings(); true }
+                Key.Search -> { onSearch(); true }
+                else -> false
+            }
         },
     ) {
         AsyncImage(
             model = artworkModel(wallpaper),
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale },
+            modifier = Modifier.fillMaxSize(),
         )
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Background.copy(alpha = .22f), Color.Transparent, Background.copy(alpha = .68f)))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Background.copy(alpha = .60f), Color.Transparent, Background.copy(alpha = .68f)))))
         HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp))
         if (footballWidgetEnabled) FootballWidget(
             football,
@@ -1218,11 +1291,12 @@ private fun AppsOnlyHome(
             onLaunch = onLaunch,
             onConfigureApp = onConfigureApp,
             movingAppKey = movingAppKey,
-            moveConfirmReady = moveConfirmReady,
+            dockFocusKey = dockFocusKey,
             onMoveApp = onMoveApp,
             onMoveDone = onMoveDone,
             onHiddenApps = onHiddenApps,
             onSettings = onSettings,
+            onSearch = onSearch,
             onRowFocused = {},
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
         )
@@ -1338,35 +1412,51 @@ private fun AppDock(
     onLaunch: (LauncherApp) -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
-    moveConfirmReady: Boolean,
+    dockFocusKey: String?,
     onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
     onHiddenApps: () -> Unit,
     onSettings: () -> Unit,
     onRowFocused: (FocusRequester) -> Unit,
+    onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onDown: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
+    var moveJob by remember { mutableStateOf<Job?>(null) }
+    val returnFocus = remember { FocusRequester() }
+    LaunchedEffect(dockFocusKey) {
+        if (dockFocusKey == null) return@LaunchedEffect
+        val index = apps.indexOfFirst { launcherAppKey(it) == dockFocusKey }
+            .takeIf { it >= 0 } ?: if (dockFocusKey == "hidden") apps.size + 1 else return@LaunchedEffect
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) listState.scrollToItem(index)
+        withFrameNanos { }
+        returnFocus.requestFocus()
+    }
     Box(
         modifier.fillMaxWidth().height(if (showLabels || movingAppKey != null) 116.dp else 92.dp)
             .padding(horizontal = 48.dp)
             .clip(RoundedCornerShape(24.dp))
-            .background(Brush.linearGradient(listOf(Color(0xC92D3340), Color(0xB91B202A))))
-            .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(24.dp)),
+            .background(Color(0xD4141820)),
     ) {
         CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
         LazyRow(
             state = listState,
             contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxSize().focusGroup(),
+            modifier = Modifier.fillMaxSize().focusGroup().onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown && onDown != null && movingAppKey == null) {
+                    onDown()
+                    true
+                } else false
+            },
         ) {
             itemsIndexed(
                 apps,
                 key = { _, app -> app.component.flattenToShortString() },
                 contentType = { _, _ -> "app" },
             ) { index, app ->
-                val itemFocus = if (index == 0) firstFocus else remember { FocusRequester() }
+                val itemFocus = remember { FocusRequester() }
                 AppCard(
                     app,
                     focusLift,
@@ -1374,20 +1464,28 @@ private fun AppDock(
                     onLaunch,
                     onConfigureApp,
                     moving = launcherAppKey(app) == movingAppKey,
-                    moveConfirmReady = moveConfirmReady,
                     movePosition = "${index + 1}/${apps.size}",
                     onMove = { offset ->
                         val destination = onMoveApp(app, offset)
-                        scope.launch {
-                            delay(16)
-                            listState.animateScrollToItem((destination - 2).coerceAtLeast(0))
+                        moveJob?.cancel()
+                        moveJob = scope.launch {
+                            withFrameNanos { }
+                            if (listState.layoutInfo.visibleItemsInfo.none { it.index == destination }) listState.scrollToItem(destination)
                         }
                     },
                     onMoveDone = onMoveDone,
                     onFocused = { onRowFocused(itemFocus) },
-                    modifier = Modifier.animateItem(fadeInSpec = null, placementSpec = tween(150), fadeOutSpec = null)
+                    modifier = Modifier.animateItem(fadeInSpec = tween(120), placementSpec = tween(150), fadeOutSpec = tween(90))
+                        .then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                        .then(if (launcherAppKey(app) == dockFocusKey) Modifier.focusRequester(returnFocus) else Modifier)
                         .focusRequester(itemFocus)
                         .focusProperties { up = upFocus; down = downFocus },
+                )
+            }
+            item(key = "search", contentType = "action") {
+                ShelfActionCard(
+                    "Search", Icons.Default.Search, focusLift, showLabels, onSearch,
+                    Modifier.focusProperties { up = upFocus; down = downFocus },
                 )
             }
             item(key = "hidden") {
@@ -1395,7 +1493,8 @@ private fun AppDock(
                 val itemFocus = if (apps.isEmpty()) firstFocus else shelfFocus
                 ShelfActionCard(
                     "Hidden", Icons.Default.Delete, focusLift, showLabels, onHiddenApps,
-                    Modifier.focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
+                    Modifier.then(if (dockFocusKey == "hidden") Modifier.focusRequester(returnFocus) else Modifier)
+                        .focusRequester(itemFocus).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused(itemFocus) },
                 )
             }
@@ -1448,7 +1547,7 @@ private fun ShelfActionCard(
             }
             if (showLabel) {
                 Spacer(Modifier.height(8.dp))
-                Text(tr(label), color = Color.White.copy(alpha = if (focused) 1f else .60f), fontSize = 11.sp)
+                Text(tr(label), color = Color.White.copy(alpha = if (focused) 1f else .76f), fontSize = 11.sp)
             }
         }
     }
@@ -1463,26 +1562,16 @@ private fun AppCard(
     onLaunch: (LauncherApp) -> Unit,
     onConfigure: (LauncherApp) -> Unit,
     moving: Boolean,
-    moveConfirmReady: Boolean,
     movePosition: String,
     onMove: (Int) -> Unit,
     onMoveDone: () -> Unit,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val movePress = remember(moving) { RemotePressGate() }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     LaunchedEffect(focused) { if (focused) onFocused() }
-    val floatOffset = if (moving) {
-        val motion = rememberInfiniteTransition(label = "moving app")
-        val offset by motion.animateFloat(
-            initialValue = -5f,
-            targetValue = 3f,
-            animationSpec = infiniteRepeatable(tween(620), RepeatMode.Reverse),
-            label = "moving app float",
-        )
-        offset
-    } else 0f
     val tileWidth = 116.dp
     val tileHeight = 68.dp
     val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
@@ -1490,7 +1579,6 @@ private fun AppCard(
         onClick = { if (moving) onMoveDone() else onLaunch(app) },
         onLongClick = { if (!moving) onConfigure(app) },
         modifier = modifier.width(tileWidth)
-            .activeTransform(1f, floatOffset)
             .zIndex(if (focused || moving) 1f else 0f)
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
@@ -1499,8 +1587,11 @@ private fun AppCard(
                         event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> onMove(-1)
                         event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> onMove(1)
                         event.type == KeyEventType.KeyDown && keyCode == android.view.KeyEvent.KEYCODE_BACK -> onMoveDone()
-                        keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER -> {
-                            if (event.type == KeyEventType.KeyUp && moveConfirmReady) onMoveDone()
+                        keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP || keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN -> Unit
+                        keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+                            keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER || keyCode == android.view.KeyEvent.KEYCODE_BUTTON_A -> {
+                            val consumed = movePress.consume(keyCode, event.type == KeyEventType.KeyDown, event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.downTime)
+                            if (!consumed && event.type == KeyEventType.KeyUp) onMoveDone()
                         }
                         else -> return@onPreviewKeyEvent false
                     }
@@ -1543,7 +1634,7 @@ private fun AppCard(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (moving) (if (LocalRomanian.current) "←  MUTĂ $movePosition  →" else "←  MOVE $movePosition  →") else app.name,
-                    color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .60f),
+                    color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .76f),
                     fontSize = 11.sp,
                     fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
@@ -1562,38 +1653,60 @@ private fun TvDialog(
     previewBackground: Boolean = true,
     content: @Composable androidx.compose.foundation.layout.BoxScope.(() -> Unit) -> Unit,
 ) {
-    var visible by remember { mutableStateOf(false) }
+    val confirmPress = remember { RemotePressGate() }
+    val reveal = remember { Animatable(0f) }
+    var ready by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(120), label = "dialog visibility")
     val close = {
         if (!closing) {
             closing = true
-            visible = false
             scope.launch {
-                delay(130)
+                reveal.animateTo(0f, tween(100))
                 onDismiss()
             }
         }
     }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        DisposableEffect(window) {
+            window?.setWindowAnimations(0)
+            window?.setDimAmount(0f)
+            onDispose { }
+        }
         Box(
-            Modifier.fillMaxSize().background(Background.copy(alpha = if (previewBackground) .38f else .9f)),
+            Modifier.fillMaxSize().drawBehind {
+                drawRect(Background.copy(alpha = (if (previewBackground) .56f else .9f) * reveal.value))
+            }.onPreviewKeyEvent { event ->
+                val native = event.nativeKeyEvent
+                if (closing) true
+                else when (native.keyCode) {
+                    android.view.KeyEvent.KEYCODE_DPAD_CENTER, android.view.KeyEvent.KEYCODE_ENTER,
+                    android.view.KeyEvent.KEYCODE_NUMPAD_ENTER, android.view.KeyEvent.KEYCODE_BUTTON_A ->
+                        confirmPress.consume(native.keyCode, event.type == KeyEventType.KeyDown, native.repeatCount, native.downTime, ready)
+                    else -> false
+                }
+            },
             contentAlignment = Alignment.Center,
         ) {
             if (ambient) AmbientBackdrop()
             Box(
                 modifier.graphicsLayer {
-                    this.alpha = alpha
-                    translationX = (1f - alpha) * 18f
-                }.clip(DialogShape).background(
-                    if (previewBackground) Brush.verticalGradient(listOf(Color(0xE61D2029), Color(0xE60F1117))) else PanelBrush
-                )
-                    .border(1.dp, Color.White.copy(alpha = .12f), DialogShape),
-            ) { content(close) }
+                    alpha = reveal.value
+                    translationY = (1f - reveal.value) * 8.dp.toPx()
+                }.clip(DialogShape).background(Color(0xFA151921))
+                    .border(1.dp, Color.White.copy(alpha = .08f), DialogShape),
+            ) {
+                CompositionLocalProvider(LocalDialogReady provides ready) { content(close) }
+            }
+        }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            if (closing) return@LaunchedEffect
+            reveal.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
+            ready = true
         }
     }
-    LaunchedEffect(Unit) { visible = true }
 }
 
 @Composable
@@ -1615,24 +1728,6 @@ private fun DialogHeader(
 }
 
 @Composable
-private fun SettingsPanel(
-    title: String,
-    subtitle: String,
-    modifier: Modifier = Modifier,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
-) {
-    Column(
-        modifier.clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = .055f))
-            .border(1.dp, Color.White.copy(alpha = .07f), RoundedCornerShape(20.dp)).padding(20.dp),
-    ) {
-        Text(tr(title), color = Violet, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
-        Text(tr(subtitle), color = Color.White.copy(alpha = .48f), fontSize = 12.sp)
-        Spacer(Modifier.height(Gap))
-        content()
-    }
-}
-
-@Composable
 private fun TvTextField(
     value: String,
     onValueChange: (String) -> Unit,
@@ -1640,6 +1735,8 @@ private fun TvTextField(
     modifier: Modifier = Modifier,
     imeAction: ImeAction = ImeAction.Done,
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var focused by remember { mutableStateOf(false) }
     BasicTextField(
         value = value,
@@ -1648,14 +1745,19 @@ private fun TvTextField(
         textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 20.sp),
         cursorBrush = SolidColor(Violet),
         keyboardOptions = KeyboardOptions(imeAction = imeAction),
-        modifier = modifier.onFocusChanged { focused = it.isFocused },
+        modifier = modifier.onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                keyboard?.hide()
+                focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+            } else false
+        },
         decorationBox = { field ->
-            Row(
+            Box(
                 Modifier.fillMaxWidth().height(60.dp).clip(ControlShape)
                     .background(Color.White.copy(alpha = if (focused) .1f else .055f))
                     .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .1f), ControlShape)
                     .padding(horizontal = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.CenterStart,
             ) {
                 if (value.isEmpty()) Text(tr(placeholder), color = Color.White.copy(alpha = .4f), fontSize = 20.sp)
                 field()
@@ -1674,26 +1776,23 @@ private fun AppOptionsDialog(
     onDismiss: () -> Unit,
 ) {
     val first = remember { FocusRequester() }
-    var ready by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { delay(350); first.requestFocus(); ready = true }
-    TvDialog(onDismiss, Modifier.width(760.dp)) { close ->
+    var action by remember { mutableStateOf<(() -> Unit)?>(null) }
+    TvDialog({ action?.invoke() ?: onDismiss() }, Modifier.fillMaxWidth(.72f)) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready) { if (ready) first.requestFocus() }
+        fun choose(next: () -> Unit) { action = next; close() }
         Column(Modifier.padding(DialogPadding)) {
-            DialogHeader(
-                app.name,
-                "App options",
-                leading = { AsyncImage(app.icon, app.name, Modifier.size(56.dp), contentScale = ContentScale.Fit) },
+            DialogHeader(app.name, "App options",
+                leading = { AsyncImage(app.icon, null, Modifier.size(48.dp), contentScale = ContentScale.Fit) },
+                action = { ActionButton("Close", icon = Icons.Default.Close, onClick = close) },
             )
-                Spacer(Modifier.height(GapLarge))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                    AppOptionTile("Move", "Reorder on Home", Icons.AutoMirrored.Filled.List, Modifier.weight(1f).focusRequester(first)) { if (ready) onMove() }
-                    AppOptionTile("Rename", "Shelf label", Icons.Default.Edit, Modifier.weight(1f)) { if (ready) onRename() }
-                    AppOptionTile("App info", "Manage or uninstall", Icons.Default.Info, Modifier.weight(1f)) { if (ready) onAppInfo() }
-                    AppOptionTile("Hide", "Remove from Home", Icons.Default.Delete, Modifier.weight(1f)) { if (ready) onHide() }
-                }
-                Spacer(Modifier.height(GapLarge))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Close", icon = Icons.Default.Close, onClick = close)
-                }
+            Spacer(Modifier.height(24.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppOptionTile("Move", "Reorder on Home", Icons.AutoMirrored.Filled.List, Modifier.focusRequester(first)) { choose(onMove) }
+                AppOptionTile("Rename", "Change the name shown on Home", Icons.Default.Edit) { choose(onRename) }
+                AppOptionTile("App info", "Manage or uninstall", Icons.Default.Info) { choose(onAppInfo) }
+                AppOptionTile("Hide", "Restore anytime from Hidden apps", Icons.Default.Delete) { choose(onHide) }
+            }
         }
     }
 }
@@ -1711,25 +1810,27 @@ private fun AppOptionTile(
     val shape = RoundedCornerShape(18.dp)
     Card(
         onClick = onClick,
-        modifier = modifier.zIndex(if (focused) 1f else 0f),
+        modifier = modifier.fillMaxWidth().zIndex(if (focused) 1f else 0f),
         shape = CardDefaults.shape(shape = shape),
         colors = CardDefaults.colors(
             containerColor = Color.White.copy(alpha = .055f),
             focusedContainerColor = Violet.copy(alpha = .18f),
             pressedContainerColor = Violet.copy(alpha = .26f),
         ),
-        scale = CardDefaults.scale(focusedScale = 1.025f, pressedScale = .99f),
+        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = .99f),
         border = CardDefaults.border(
             border = Border(BorderStroke(1.dp, Color.White.copy(alpha = .09f)), shape = shape),
             focusedBorder = Border(BorderStroke(2.dp, Violet), shape = shape),
         ),
         interactionSource = interaction,
     ) {
-        Column(Modifier.padding(18.dp)) {
-            Icon(icon, contentDescription = null, tint = if (focused) Color.White else Color.White.copy(alpha = .68f), modifier = Modifier.size(27.dp))
-            Spacer(Modifier.height(14.dp))
-            Text(tr(title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(tr(subtitle), color = Color.White.copy(alpha = if (focused) .68f else .44f), fontSize = 11.sp, maxLines = 1)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Icon(icon, contentDescription = null, tint = if (focused) Violet else Color.White.copy(alpha = .68f), modifier = Modifier.size(24.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(tr(title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr(subtitle), color = Color.White.copy(alpha = .52f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
@@ -1744,8 +1845,10 @@ private fun AppRenameDialog(
     var name by remember(app) { mutableStateOf(app.name) }
     val fieldFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(Unit) { delay(180); fieldFocus.requestFocus(); keyboard?.show() }
-    TvDialog(onDismiss, Modifier.width(640.dp)) { close ->
+    var action by remember { mutableStateOf<(() -> Unit)?>(null) }
+    TvDialog({ action?.invoke() ?: onDismiss() }, Modifier.fillMaxWidth(.72f)) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready) { if (ready) { fieldFocus.requestFocus(); keyboard?.show() } }
         Column(Modifier.padding(DialogPadding)) {
             DialogHeader(
                 "Rename app",
@@ -1761,11 +1864,15 @@ private fun AppRenameDialog(
                 )
                 Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Reset", icon = Icons.Default.Refresh, onClick = onReset)
+                    ActionButton("Reset", icon = Icons.Default.Refresh, onClick = { keyboard?.hide(); action = onReset; close() })
                     Spacer(Modifier.width(Gap))
                     ActionButton("Cancel", icon = Icons.Default.Close, onClick = close)
                     Spacer(Modifier.width(Gap))
-                    ActionButton("Save", icon = Icons.Default.Check) { name.trim().takeIf(String::isNotEmpty)?.let(onSave) }
+                    ActionButton("Save", icon = Icons.Default.Check, enabled = name.isNotBlank()) {
+                        keyboard?.hide()
+                        action = { onSave(name.trim()) }
+                        close()
+                    }
                 }
         }
     }
@@ -1778,39 +1885,49 @@ private fun HiddenAppsDialog(
     onRestore: (LauncherApp) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val first = remember { FocusRequester() }
-    var ready by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { delay(350); ready = true; first.requestFocus() }
-    TvDialog(onDismiss, Modifier.width(960.dp).height(640.dp)) { close ->
+    val done = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+    val restoreFocus = remember(apps) { List(apps.size) { FocusRequester() } }
+    var restoredIndex by remember { mutableStateOf<Int?>(null) }
+    TvDialog(onDismiss, Modifier.fillMaxWidth(.86f).fillMaxHeight(.82f)) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready, apps) {
+            if (!ready) return@LaunchedEffect
+            val index = restoredIndex
+            if (apps.isEmpty() || index == null) done.requestFocus() else {
+                val target = index.coerceAtMost(apps.lastIndex)
+                listState.scrollToItem(target)
+                withFrameNanos { }
+                restoreFocus[target].requestFocus()
+            }
+            restoredIndex = null
+        }
         Column(Modifier.padding(DialogPadding)) {
-                DialogHeader("Hidden apps", "Open an app or return it to Home")
-                Spacer(Modifier.height(GapLarge))
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Gap)) {
-                    itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }) { index, app ->
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                                .background(Color.White.copy(alpha = .065f)).padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            AsyncImage(app.icon, app.name, Modifier.size(48.dp), contentScale = ContentScale.Fit)
-                            Column(Modifier.weight(1f)) {
-                                Text(app.name, color = Color.White.copy(alpha = .92f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                Text(tr("Hidden from Home"), color = Color.White.copy(alpha = .42f), fontSize = 11.sp)
-                            }
-                            ActionButton(
-                                "Open",
-                                modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
-                                icon = Icons.Default.PlayArrow,
-                            ) { if (ready) onLaunch(app) }
-                            ActionButton("Show on Home", icon = Icons.Default.Home) { if (ready) onRestore(app) }
+            DialogHeader("Hidden apps", "Open an app or return it to Home", action = {
+                ActionButton("Done", Modifier.focusRequester(done), icon = Icons.Default.Check, onClick = close)
+            })
+            Spacer(Modifier.height(GapLarge))
+            if (apps.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Home, null, tint = Violet, modifier = Modifier.size(36.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text(tr("No hidden apps"), fontSize = 22.sp, color = Color.White)
+                    Text(tr("All your apps are on Home"), fontSize = 13.sp, color = Color.White.copy(alpha = .55f))
+                }
+            } else LazyColumn(state = listState, modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }, contentType = { _, _ -> "hidden-app" }) { index, app ->
+                    Row(Modifier.animateItem(fadeInSpec = tween(120), placementSpec = tween(150), fadeOutSpec = tween(90)).fillMaxWidth().clip(ControlShape).background(Color.White.copy(alpha = .035f)).padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        AsyncImage(app.icon, null, Modifier.size(42.dp), contentScale = ContentScale.Fit)
+                        Text(app.name, modifier = Modifier.weight(1f), fontSize = 17.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        ActionButton("Open", icon = Icons.Default.PlayArrow) { onLaunch(app) }
+                        ActionButton("Show on Home", Modifier.focusRequester(restoreFocus[index]), icon = Icons.Default.Home) {
+                            restoredIndex = index
+                            onRestore(app)
                         }
                     }
                 }
-                if (apps.isEmpty()) Text(tr("No hidden apps"), color = Color.White.copy(alpha = .55f), modifier = Modifier.weight(1f))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Done", modifier = if (apps.isEmpty()) Modifier.focusRequester(first) else Modifier, icon = Icons.Default.Check, onClick = close)
-                }
+            }
         }
     }
 }
@@ -1825,7 +1942,6 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
     val confirm = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(Unit) { delay(180); field.requestFocus(); keyboard?.show() }
     LaunchedEffect(selected) {
         if (selected != null) {
             keyboard?.hide()
@@ -1845,7 +1961,9 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
         suggestions = WeatherRepository.locations(value)
         loading = false
     }
-    TvDialog(onDismiss, Modifier.width(700.dp).height(620.dp)) { close ->
+    TvDialog(onDismiss, Modifier.fillMaxWidth(.86f).fillMaxHeight(.88f)) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready) { if (ready) { field.requestFocus(); keyboard?.show() } }
         Column(Modifier.padding(DialogPadding)) {
             DialogHeader("Weather location", "Search, choose, then confirm")
             Spacer(Modifier.height(GapLarge))
@@ -1886,6 +2004,10 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
 
 @Composable
 private fun SettingsDialog(
+    section: Int,
+    onSectionChange: (Int) -> Unit,
+    updateStatus: UpdateStatus,
+    onUpdate: () -> Unit,
     theaterEnabled: Boolean,
     idleMinutes: Int,
     focusLift: Boolean,
@@ -1914,88 +2036,112 @@ private fun SettingsDialog(
     onHomeSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { delay(180); first.requestFocus() }
-    TvDialog(onDismiss, Modifier.width(880.dp)) { close ->
+    val categoryFocus = remember { List(4) { FocusRequester() } }
+    val titles = listOf("HOME", "APP SHELF", "WEATHER & TIME", "SYSTEM")
+    TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.88f)) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready) { if (ready) categoryFocus[section].requestFocus() }
         Column(Modifier.padding(DialogPadding)) {
-                DialogHeader(
-                    "Settings",
-                    "A quiet home for apps and discovery",
-                    action = { ActionButton("Done", icon = Icons.Default.Check, onClick = close) },
-                )
-                Spacer(Modifier.height(GapLarge))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SettingsPanel("APP SHELF", "Find and manage Home apps", Modifier.weight(1f)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            if (moviesEnabled) ActionButton("Search", modifier = Modifier.focusRequester(first), icon = Icons.Default.Search, onClick = onSearch)
-                            ActionButton(
-                                "Hidden${if (hiddenAppCount > 0) " · $hiddenAppCount" else ""}",
-                                modifier = if (moviesEnabled) Modifier else Modifier.focusRequester(first),
-                                icon = Icons.Default.Delete,
-                                onClick = onHiddenApps,
-                            )
-                        }
-                        Spacer(Modifier.height(Gap))
-                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton(if (showAppLabels) "Labels on" else "Labels off") {
-                                onShowAppLabels(!showAppLabels)
-                            }
-                            ActionButton(if (focusLift) "Lifted focus" else "Outline focus") {
-                                onFocusLift(!focusLift)
-                            }
-                        }
+            DialogHeader("Settings", "A quiet home for apps and discovery", action = {
+                ActionButton("Done", icon = Icons.Default.Check, onClick = close)
+            })
+            Spacer(Modifier.height(24.dp))
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                Column(Modifier.width(184.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    titles.forEachIndexed { index, title ->
+                        ActionButton(title, Modifier.fillMaxWidth().focusRequester(categoryFocus[index]), isSelected = section == index) { onSectionChange(index) }
                     }
-                    SettingsPanel("HOME", "Featured movies or a calm wallpaper", Modifier.weight(1f)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton(if (moviesEnabled) "Movies on" else "Apps only") { onMoviesEnabled(!moviesEnabled) }
-                            if (!moviesEnabled) ActionButton("New wallpaper", icon = Icons.Default.Refresh, onClick = onNextWallpaper)
+                }
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White.copy(alpha = .08f)))
+                Column(Modifier.weight(1f).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Text(tr(titles[section]), color = Violet, fontSize = 12.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
+                    when (section) {
+                        0 -> {
+                            Text(tr("Featured movies or a calm wallpaper"), color = Color.White, fontSize = 21.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                                ActionButton(if (moviesEnabled) "Movies on" else "Apps only") { onMoviesEnabled(!moviesEnabled) }
+                                if (!moviesEnabled) ActionButton("New wallpaper", icon = Icons.Default.Refresh, onClick = onNextWallpaper)
+                            }
+                            if (moviesEnabled) {
+                                Text(tr("Ambient trailers after a quiet moment"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                                    ActionButton(if (theaterEnabled) "Theater on" else "Theater off") { onTheaterEnabled(!theaterEnabled) }
+                                    ActionButton("After $idleMinutes min", enabled = theaterEnabled) { onIdleMinutes(nextTheaterIdleMinutes(idleMinutes)) }
+                                }
+                            } else {
+                                ActionButton(if (footballWidgetEnabled) "Football on" else "Football off") { onFootballWidget(!footballWidgetEnabled) }
+                                Text(tr("Daily wallpaper · Picsum"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                            }
                         }
-                        Spacer(Modifier.height(Gap))
-                        if (moviesEnabled) Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton(if (theaterEnabled) "Theater on" else "Theater off", icon = if (theaterEnabled) Icons.Default.PlayArrow else Icons.Default.Close) {
-                                onTheaterEnabled(!theaterEnabled)
+                        1 -> {
+                            Text(tr("Find and manage Home apps"), color = Color.White, fontSize = 21.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                                ActionButton("Search", icon = Icons.Default.Search, onClick = onSearch)
+                                ActionButton("Hidden · $hiddenAppCount", icon = Icons.Default.Home, onClick = onHiddenApps)
                             }
-                            ActionButton("After $idleMinutes min") { onIdleMinutes(nextTheaterIdleMinutes(idleMinutes)) }
-                        } else Row(horizontalArrangement = Arrangement.spacedBy(Gap), verticalAlignment = Alignment.CenterVertically) {
-                            ActionButton(if (footballWidgetEnabled) "Football on" else "Football off") {
-                                onFootballWidget(!footballWidgetEnabled)
+                            Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                                ActionButton(if (showAppLabels) "Labels on" else "Labels off") { onShowAppLabels(!showAppLabels) }
+                                ActionButton(if (focusLift) "Lifted focus" else "Outline focus") { onFocusLift(!focusLift) }
                             }
-                            Text(tr("Daily wallpaper · Picsum"), color = Color.White.copy(alpha = .38f), fontSize = 11.sp)
+                            Text(tr("Hold an app to move, rename or hide it"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                        }
+                        2 -> {
+                            Text(tr("Location, temperature and clock"), color = Color.White, fontSize = 21.sp)
+                            ActionButton(weatherLocation, Modifier.fillMaxWidth(), onClick = onWeatherLocation)
+                            Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                                ActionButton(if (weatherCelsius) "°C" else "°F") { onWeatherCelsius(!weatherCelsius) }
+                                ActionButton(if (use24HourClock) "24 h" else "12 h") { onClockFormat(!use24HourClock) }
+                            }
+                        }
+                        3 -> {
+                            Text(tr("Home and Android controls"), color = Color.White, fontSize = 21.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                                ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
+                                ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
+                            }
+                            ActionButton(if (romanian) "Română" else "English") { onLanguage(!romanian) }
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SettingsPanel("WEATHER & TIME", "Location, temperature and clock", Modifier.weight(1f)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton(weatherLocation.take(14), onClick = onWeatherLocation)
-                            ActionButton(if (weatherCelsius) "°C" else "°F") { onWeatherCelsius(!weatherCelsius) }
-                            ActionButton(if (use24HourClock) "24 h" else "12 h") { onClockFormat(!use24HourClock) }
-                        }
-                    }
-                    SettingsPanel("SYSTEM", "Home and Android controls", Modifier.weight(1f)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                            ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
-                            ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
-                        }
-                        Spacer(Modifier.height(Gap))
-                        ActionButton(if (romanian) "Română" else "English") { onLanguage(!romanian) }
-                    }
+            }
+            Spacer(Modifier.height(20.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = .08f)))
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Gap)) {
+                Text("v${BuildConfig.VERSION_NAME}", color = Color.White.copy(alpha = .44f), fontSize = 12.sp)
+                Spacer(Modifier.weight(1f))
+                AnimatedContent(
+                    targetState = if (updateStatus.busy) updateStatus.label else updateStatus.message,
+                    modifier = Modifier.width(260.dp).height(40.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                    transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(90)) }, label = "update status",
+                ) { message -> Text(tr(message), color = if (updateStatus.busy) Violet else Color.White.copy(alpha = .68f), fontSize = 12.sp, maxLines = 2, textAlign = TextAlign.End) }
+                ActionButton(if (updateStatus.label == "Install update") "Install update" else "Check for updates", Modifier.width(214.dp), icon = Icons.Default.Refresh) {
+                    if (!updateStatus.busy) onUpdate()
                 }
+            }
         }
     }
 }
 
 @Composable
 private fun SearchDialog(
+    visible: Boolean,
     suggestions: List<MediaItem>,
     onDismiss: () -> Unit,
     onSelect: (MediaItem) -> Unit,
 ) {
+    val isForeground = LocalForeground.current
+    var completedQuery by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<MediaItem>()) }
     var loading by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    var retry by remember { mutableStateOf(0) }
+    val resultState = rememberLazyListState()
+    var openedOnce by remember { mutableStateOf(false) }
     val inputRequester = remember { FocusRequester() }
+    val resultRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
     val voiceIntent = remember {
@@ -2006,29 +2152,46 @@ private fun SearchDialog(
     val voiceAvailable = remember { voiceIntent.resolveActivity(context.packageManager) != null }
     val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { query = it }
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { query = it.take(80) }
         }
     }
 
-    LaunchedEffect(Unit) {
-        delay(120)
-        inputRequester.requestFocus()
-        keyboard?.show()
-    }
-    LaunchedEffect(query) {
+    LaunchedEffect(query.trim(), retry, isForeground) {
+        if (!isForeground) return@LaunchedEffect
+        if (completedQuery == query.trim() && !failed) { loading = false; return@LaunchedEffect }
+        resultState.scrollToItem(0)
         val term = query.trim()
+        failed = false
         if (term.length < 2) {
             results = emptyList()
+            completedQuery = null
             loading = false
             return@LaunchedEffect
         }
         loading = true
         delay(350)
-        results = CatalogRepository.search(term)
+        CatalogRepository.searchResult(term).fold(
+            onSuccess = { results = it; completedQuery = term },
+            onFailure = { results = emptyList(); failed = true },
+        )
         loading = false
     }
 
-    TvDialog(onDismiss, Modifier.fillMaxWidth(.92f).fillMaxHeight(.74f)) { close ->
+    if (!visible) return
+    val shown = if (query.trim().length < 2) suggestions else results
+    TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.78f)) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready) {
+            if (ready) {
+                if (openedOnce && shown.isNotEmpty() && !failed) {
+                    resultRequester.requestFocus()
+                } else {
+                    inputRequester.requestFocus()
+                    if (!openedOnce) keyboard?.show()
+                }
+                openedOnce = true
+            }
+        }
         Column(Modifier.padding(DialogPadding)) {
             DialogHeader(
                 "Search",
@@ -2044,13 +2207,20 @@ private fun SearchDialog(
                     imeAction = ImeAction.Search,
                     modifier = Modifier.weight(1f).focusRequester(inputRequester),
                 )
+                ActionButton("Clear", icon = Icons.Default.Close, enabled = query.isNotEmpty()) {
+                    query = ""
+                    inputRequester.requestFocus()
+                    keyboard?.show()
+                }
                 if (voiceAvailable) ActionButton("Voice") { voice.launch(voiceIntent) }
             }
             Spacer(Modifier.height(24.dp))
-            val shown = if (query.trim().length < 2) suggestions else results
             Text(
                 tr(when {
-                    query.trim().length < 2 -> "Popular now"
+                    query.trim().length == 1 -> "Type at least two letters"
+                    query.isBlank() && suggestions.isEmpty() -> "Find your next movie"
+                    query.isBlank() -> "Popular now"
+                    failed -> "Search unavailable · try again"
                     loading -> "Finding suggestions…"
                     shown.isEmpty() -> "No matches"
                     else -> "Suggestions"
@@ -2060,10 +2230,18 @@ private fun SearchDialog(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
-            if (loading) {
-                LoadingPosterRow()
-            } else {
-                PosterStrip(shown, onSelect = { keyboard?.hide(); onSelect(it) })
+            Box(Modifier.fillMaxWidth().height(140.dp)) {
+                if (shown.isNotEmpty() && !failed) PosterStrip(
+                    shown, state = resultState, modifier = Modifier.graphicsLayer { alpha = if (loading) .35f else 1f },
+                    itemModifier = { if (it == resultState.firstVisibleItemIndex) Modifier.focusRequester(resultRequester) else Modifier },
+                    onSelect = { if (!loading) { keyboard?.hide(); onSelect(it) } },
+                )
+                else if (loading) LoadingPosterRow()
+                else Column(Modifier.align(Alignment.CenterStart), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(tr(if (failed) "Check your connection and search again" else if (query.trim().length >= 2) "Try a different title" else "Search movies, series and animation"),
+                    color = Color.White.copy(alpha = .52f), fontSize = 14.sp)
+                    if (failed) ActionButton("Retry", icon = Icons.Default.Refresh) { retry += 1 }
+                }
             }
         }
     }
@@ -2071,44 +2249,35 @@ private fun SearchDialog(
 
 @Composable
 private fun LauncherStage(
-    item: MediaItem,
+    item: MediaItem?,
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
     modifier: Modifier = Modifier,
+    heroAction: @Composable () -> Unit,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
 ) {
     var displayed by remember { mutableStateOf(item) }
     val reveal = remember { Animatable(1f) }
-    val ambient = rememberInfiniteTransition(label = "artwork drift")
-    val artworkScale by ambient.animateFloat(
-        initialValue = 1.01f,
-        targetValue = 1.045f,
-        animationSpec = infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "artwork zoom",
-    )
-    LaunchedEffect(mediaKey(item)) {
-        if (mediaKey(displayed) == mediaKey(item)) return@LaunchedEffect
-        reveal.animateTo(0f, tween(100, easing = LinearEasing))
+    LaunchedEffect(item) {
+        if (displayed == item) return@LaunchedEffect
+        reveal.snapTo(0f)
         displayed = item
-        delay(16)
-        reveal.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+        reveal.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
     }
     Box(
         modifier
             .fillMaxWidth()
             .height(548.dp)
             .clipToBounds()
-            .background(Brush.linearGradient(listOf(Color(0xFF2D1760), Color(0xFF10101E))))
+            .background(Background)
     ) {
-        displayed.backdropUrl?.let {
+        displayed?.backdropUrl?.let {
             AsyncImage(
                 model = artworkModel(it),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    scaleX = artworkScale
-                    scaleY = artworkScale
                     alpha = reveal.value
                 },
             )
@@ -2116,16 +2285,16 @@ private fun LauncherStage(
         Box(
             Modifier.fillMaxSize().background(
                 Brush.horizontalGradient(
-                    0f to Background.copy(alpha = .44f),
-                    .5f to Background.copy(alpha = .12f),
-                    1f to Background.copy(alpha = .34f),
+                    0f to Background.copy(alpha = .84f),
+                    .5f to Background.copy(alpha = .42f),
+                    1f to Background.copy(alpha = .18f),
                 )
             )
         )
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to Background.copy(alpha = .24f),
+                    0f to Background.copy(alpha = .55f),
                     .28f to Color.Transparent,
                     .68f to Color.Transparent,
                     1f to Background,
@@ -2133,36 +2302,39 @@ private fun LauncherStage(
             )
         )
         Column(
-            Modifier.align(Alignment.TopStart).width(600.dp).padding(start = 66.dp, top = 108.dp, end = 24.dp)
-                .activeTransform(
-                    scale = 1f,
-                    translationX = (1f - reveal.value) * 10f,
-                    alpha = reveal.value,
-                ),
+            Modifier.align(Alignment.TopStart).width(550.dp).padding(start = 58.dp, top = 104.dp, end = 24.dp)
+                .graphicsLayer {
+                    translationX = (1f - reveal.value) * 10f
+                    alpha = reveal.value
+                },
         ) {
             Text(
-                displayed.title,
+                displayed?.title ?: tr("Your apps, ready"),
                 color = Color.White,
-                fontSize = 36.sp,
+                fontSize = 32.sp,
+                lineHeight = 37.sp,
+                letterSpacing = (-.7).sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "${displayed.year}   ·   ★ ${"%.1f".format(displayed.score)}",
-                color = Color.White.copy(alpha = .82f),
-                fontSize = 14.sp,
+                displayed?.let { "${it.year}   ·   ${tr(mediaRating(it))}" } ?: "",
+                color = Violet.copy(alpha = .95f),
+                fontSize = 13.sp,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                displayed.overview,
-                color = Color.White.copy(alpha = .68f),
-                fontSize = 14.sp,
+                displayed?.overview.orEmpty(),
+                color = Color.White.copy(alpha = .76f),
+                fontSize = 13.sp,
                 lineHeight = 19.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(18.dp))
+            heroAction()
         }
         HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp))
         content()
@@ -2177,24 +2349,25 @@ private fun HomeStatus(
     modifier: Modifier = Modifier,
 ) {
     var time by remember { mutableStateOf(LocalTime.now()) }
-    LaunchedEffect(Unit) {
+    val isForeground = LocalForeground.current
+    LaunchedEffect(isForeground) {
+        if (!isForeground) return@LaunchedEffect
+        time = LocalTime.now()
         while (true) {
             delay(60_000L - System.currentTimeMillis() % 60_000L)
             time = LocalTime.now()
         }
     }
-    Row(
-        modifier.clip(RoundedCornerShape(16.dp)).background(Background.copy(alpha = .68f))
-            .border(1.dp, Color.White.copy(alpha = .1f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(formatHomeTime(time, use24HourClock), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    Column(modifier, horizontalAlignment = Alignment.End) {
+        Text(
+            formatHomeTime(time, use24HourClock), color = Color.White, fontSize = 28.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = (-.5).sp,
+        )
+        Spacer(Modifier.height(2.dp))
         Text(
             localizeUi(weatherStatusText(weather, weatherState), LocalRomanian.current),
-            color = if (weatherState == WeatherLoadState.Error) Coral else Color.White.copy(alpha = .82f),
-            fontSize = 15.sp,
+            color = if (weatherState == WeatherLoadState.Error) Coral else Color.White.copy(alpha = .78f),
+            fontSize = 13.sp,
         )
     }
 }
@@ -2313,7 +2486,7 @@ private fun PosterCard(
         interactionSource = interaction,
     ) {
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))) {
-            val artwork = item.backdropUrl ?: item.posterUrl
+            val artwork = item.backdropUrl?.replace("/w1280/", "/w780/") ?: item.posterUrl
             if (artwork != null) AsyncImage(
                 artworkModel(artwork), item.title, Modifier.fillMaxSize(),
                 error = painterResource(R.drawable.reelora_mark), contentScale = ContentScale.Crop,
@@ -2324,7 +2497,7 @@ private fun PosterCard(
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))))
             Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(item.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${item.year}  ·  ★ ${"%.1f".format(item.score)}", color = Color.White.copy(alpha = .68f), fontSize = 10.sp)
+                Text("${item.year}  ·  ${tr(mediaRating(item))}", color = Color.White.copy(alpha = .68f), fontSize = 10.sp)
             }
         }
     }
@@ -2349,17 +2522,20 @@ private fun ActionButton(
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
     icon: ImageVector? = null,
+    enabled: Boolean = true,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     LaunchedEffect(focused) { if (focused) onFocused() }
     Button(
+        enabled = enabled,
         onClick = onClick,
         modifier = modifier,
         shape = ButtonDefaults.shape(shape = ControlShape),
         colors = ButtonDefaults.colors(
-            containerColor = Color.White.copy(alpha = .07f),
+            containerColor = if (isSelected) Violet.copy(alpha = .16f) else Color.White.copy(alpha = .045f),
             contentColor = Color.White.copy(alpha = .82f),
             focusedContainerColor = Violet.copy(alpha = .22f),
             focusedContentColor = Color.White,
@@ -2378,7 +2554,7 @@ private fun ActionButton(
             Icon(it, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
         }
-        Text(tr(text), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text(tr(text), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -2390,26 +2566,36 @@ private fun DetailsDialog(
     onSelect: (MediaItem) -> Unit,
     onPlayTrailer: (Trailer) -> Unit,
 ) {
+    val isForeground = LocalForeground.current
     val requester = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val actorRowRequester = remember { FocusRequester() }
     val similarRowRequester = remember { FocusRequester() }
-    var details by remember(item.id) { mutableStateOf<MediaDetails?>(null) }
-    var selectedActor by remember(item.id) { mutableStateOf<CastMember?>(null) }
-    var actorTitles by remember(item.id) { mutableStateOf<List<MediaItem>?>(null) }
-    var actorLoading by remember(item.id) { mutableStateOf(false) }
-    val artwork = details?.backdrops?.firstOrNull { it != item.backdropUrl } ?: item.backdropUrl
+    var details by remember(mediaKey(item)) { mutableStateOf<MediaDetails?>(null) }
+    var selectedActor by remember(mediaKey(item)) { mutableStateOf<CastMember?>(null) }
+    var actorTitles by remember(mediaKey(item), selectedActor?.id) { mutableStateOf<List<MediaItem>?>(null) }
+    var actorLoading by remember(mediaKey(item)) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val artwork = remember(context, item.backdropUrl) { item.backdropUrl?.let { ImageRequest.Builder(context).data(it).crossfade(120).build() } }
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
-    val restoreTop: () -> Unit = { scope.launch { listState.animateScrollToItem(0) } }
+    val restoreTop: () -> Unit = { if (listState.firstVisibleItemIndex != 0) scope.launch { listState.animateScrollToItem(0) } }
     TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f), ambient = false) { close ->
+        val ready = LocalDialogReady.current
+        LaunchedEffect(ready, mediaKey(item)) {
+            if (ready) {
+                listState.scrollToItem(0)
+                withFrameNanos { }
+                requester.requestFocus()
+            }
+        }
          Box(Modifier.fillMaxSize()) {
           Box(
               Modifier.fillMaxSize().clip(RoundedCornerShape(26.dp)).background(Color(0xFF11111C)),
           ) {
            artwork?.let {
               AsyncImage(
-                  model = artworkModel(it),
+                  model = it,
                   contentDescription = null,
                   contentScale = ContentScale.Crop,
                   modifier = Modifier.fillMaxSize(),
@@ -2428,7 +2614,7 @@ private fun DetailsDialog(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item { Column {
-                Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth().height(48.dp).focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ActionButton(
                         "Back",
                         modifier = Modifier.focusRequester(requester),
@@ -2458,21 +2644,17 @@ private fun DetailsDialog(
                         item.year,
                         item.mediaType.uppercase(),
                         details?.runtime.orEmpty(),
-                        "★ ${"%.1f".format(item.score)}",
+                        tr(mediaRating(item)),
                     ).filter { it.isNotBlank() }.joinToString("  ·  ")
                     Text(metadata, color = Coral, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    details?.genres?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, color = Color.White.copy(alpha = .58f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                    Text(details?.genres.orEmpty(), modifier = Modifier.height(18.dp), color = Color.White.copy(alpha = .58f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.height(30.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         val release = releaseLabel(item.releaseDate)
                         InfoBadge(release, if (release.startsWith("✓") || release.startsWith("●")) Color(0xFF66D69A) else Coral)
                         details?.availability?.let { AvailabilityBadge(it) }
                     }
-                    details?.availability?.let {
-                        Text(tr("Availability by JustWatch · ${it.region}"), color = Color.White.copy(alpha = .38f), fontSize = 10.sp)
-                    }
+                    Text(details?.availability?.let { tr("Availability by JustWatch · ${it.region}") }.orEmpty(), modifier = Modifier.height(14.dp), color = Color.White.copy(alpha = .38f), fontSize = 10.sp)
                     Spacer(Modifier.height(8.dp))
                     Text(item.overview, color = Color.White.copy(alpha = .78f), fontSize = 16.sp, lineHeight = 22.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
                     }
@@ -2481,16 +2663,20 @@ private fun DetailsDialog(
             item { Column {
                 Text(tr("Cast"), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
-                CastRow(
+                Box(Modifier.height(132.dp)) { CastRow(
                     details?.cast,
                     selectedActor,
-                    when {
-                        selectedActor != null && actorTitles?.isNotEmpty() == true -> actorRowRequester
-                        moreLike.isNotEmpty() -> similarRowRequester
-                        else -> null
+                    onDown = {
+                        val hasActorTitles = selectedActor != null && actorTitles?.isNotEmpty() == true
+                        val target = if (hasActorTitles) actorRowRequester else similarRowRequester
+                        if (hasActorTitles || moreLike.isNotEmpty()) scope.launch {
+                            listState.scrollToItem(if (selectedActor != null && !hasActorTitles) 3 else 2)
+                            withFrameNanos { }
+                            target.requestFocus()
+                        }
                     },
                     onSelect = { selectedActor = if (selectedActor?.id == it.id) null else it },
-                )
+                ) }
             } }
             selectedActor?.let { actor ->
                 val titles = actorTitles
@@ -2512,13 +2698,11 @@ private fun DetailsDialog(
           }
          }
     }
-    LaunchedEffect(item.id) {
-        listState.scrollToItem(0)
-        delay(140)
-        requester.requestFocus()
-        details = CatalogRepository.details(item)
+    LaunchedEffect(mediaKey(item), isForeground) {
+        if (isForeground && details == null) details = CatalogRepository.details(item)
     }
-    LaunchedEffect(selectedActor?.id) {
+    LaunchedEffect(selectedActor?.id, isForeground) {
+        if (!isForeground || actorTitles != null) return@LaunchedEffect
         selectedActor?.let { actor ->
             actorLoading = true
             actorTitles = null
@@ -2568,7 +2752,7 @@ private fun AvailabilityBadge(availability: WatchAvailability) {
 private fun CastRow(
     cast: List<CastMember>?,
     selected: CastMember?,
-    downRequester: FocusRequester?,
+    onDown: () -> Unit,
     onSelect: (CastMember) -> Unit,
 ) {
     if (cast == null) {
@@ -2585,19 +2769,24 @@ private fun CastRow(
         modifier = Modifier.focusGroup(),
     ) {
         items(cast, key = { "${it.id}-${it.name}" }, contentType = { "cast" }) { person ->
-            CastCard(person, person.id == selected?.id, downRequester, onSelect)
+            CastCard(person, person.id == selected?.id, onDown, onSelect)
         }
     }
 }
 
 @Composable
-private fun CastCard(person: CastMember, selected: Boolean, downRequester: FocusRequester?, onSelect: (CastMember) -> Unit) {
+private fun CastCard(person: CastMember, selected: Boolean, onDown: () -> Unit, onSelect: (CastMember) -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Card(
         onClick = { onSelect(person) },
         modifier = Modifier.width(96.dp).zIndex(if (focused) 1f else 0f)
-            .focusProperties { downRequester?.let { down = it } },
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                    onDown()
+                    true
+                } else false
+            },
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
         scale = CardDefaults.scale(focusedScale = 1.04f, pressedScale = .98f),
         border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),

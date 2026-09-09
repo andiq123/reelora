@@ -1,0 +1,106 @@
+{
+  "environment": "Android TV API 31, 1080p emulator; three samples per build; YouTube used as the external app",
+  "before_version": "0.22.0",
+  "after_version": "0.23.0",
+  "before": {
+    "serial": "emulator-5554",
+    "other_component": "com.google.android.youtube.tv/com.google.android.apps.youtube.tv.activity.ShellActivity",
+    "note": "am start -W timings exclude full content readiness and are not Netflix playback benchmarks.",
+    "samples": [
+      {
+        "cold": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=tv.reelora.app/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 223\nWaitTime: 228\nComplete",
+          "activity_records": [
+            "13f50d"
+          ]
+        },
+        "return": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] cmp=tv.reelora.app/.MainActivity }\nStatus: ok\nLaunchState: WARM\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 52\nWaitTime: 53\nComplete",
+          "activity_records": [
+            "13f50d",
+            "2a7b57f"
+          ]
+        }
+      },
+      {
+        "cold": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=tv.reelora.app/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 178\nWaitTime: 179\nComplete",
+          "activity_records": [
+            "c0969a3"
+          ]
+        },
+        "return": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] cmp=tv.reelora.app/.MainActivity }\nStatus: ok\nLaunchState: WARM\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 56\nWaitTime: 58\nComplete",
+          "activity_records": [
+            "c0969a3",
+            "df9d33"
+          ]
+        }
+      },
+      {
+        "cold": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=tv.reelora.app/.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 157\nWaitTime: 159\nComplete",
+          "activity_records": [
+            "23bdf4b"
+          ]
+        },
+        "return": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] cmp=tv.reelora.app/.MainActivity }\nStatus: ok\nLaunchState: WARM\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 44\nWaitTime: 47\nComplete",
+          "activity_records": [
+            "23bdf4b",
+            "987fc43"
+          ]
+        }
+      }
+    ]
+  },
+  "after": {
+    "serial": "emulator-5554",
+    "other_component": "com.google.android.youtube.tv/com.google.android.apps.youtube.tv.activity.ShellActivity",
+    "note": "am start -W timings exclude full content readiness and are not Netflix playback benchmarks.",
+    "samples": [
+      {
+        "cold": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=tv.reelora.app/.LauncherEntryActivity }\nStatus: ok\nLaunchState: COLD\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 177\nWaitTime: 178\nComplete",
+          "activity_records": [
+            "ff4ba44"
+          ]
+        },
+        "return": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] cmp=tv.reelora.app/.MainActivity }\nWarning: Activity not started, its current task has been brought to the front\nStatus: ok\nLaunchState: HOT\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 55\nWaitTime: 57\nComplete",
+          "activity_records": [
+            "ff4ba44"
+          ]
+        }
+      },
+      {
+        "cold": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=tv.reelora.app/.LauncherEntryActivity }\nStatus: ok\nLaunchState: COLD\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 178\nWaitTime: 181\nComplete",
+          "activity_records": [
+            "3a58a08"
+          ]
+        },
+        "return": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] cmp=tv.reelora.app/.MainActivity }\nWarning: Activity not started, its current task has been brought to the front\nStatus: ok\nLaunchState: HOT\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 51\nWaitTime: 54\nComplete",
+          "activity_records": [
+            "3a58a08"
+          ]
+        }
+      },
+      {
+        "cold": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=tv.reelora.app/.LauncherEntryActivity }\nStatus: ok\nLaunchState: COLD\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 151\nWaitTime: 152\nComplete",
+          "activity_records": [
+            "58a83bf"
+          ]
+        },
+        "return": {
+          "launch": "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] cmp=tv.reelora.app/.MainActivity }\nWarning: Activity not started, its current task has been brought to the front\nStatus: ok\nLaunchState: HOT\nActivity: tv.reelora.app/.MainActivity\nTotalTime: 52\nWaitTime: 53\nComplete",
+          "activity_records": [
+            "58a83bf"
+          ]
+        }
+      }
+    ]
+  }
+}

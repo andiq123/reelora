@@ -10,6 +10,66 @@ import java.time.LocalTime
 
 class CatalogRepositoryTest {
     @Test
+    fun unreleasedTitlesWithoutVotesAreNotZeroRated() {
+        val movie = MediaItem(1, "Future movie", "", "2026", 0.0, 0, "movie", null, null)
+        assertEquals("Not rated", mediaRating(movie))
+        assertEquals("★ 7.4", mediaRating(movie.copy(score = 7.4, voteCount = 20)))
+        assertEquals("Not rated", mediaRating(movie.copy(score = Double.NaN, voteCount = 20)))
+    }
+
+    @Test
+    fun comingSoonRequiresAFutureMovieDate() {
+        val today = LocalDate.of(2026, 9, 9)
+        fun movie(id: Int, date: String) = MediaItem(id, "Title", "", "2026", 7.0, 10, "movie", null, null, date)
+        val past = movie(1, "2026-09-08")
+        val now = movie(2, "2026-09-09")
+        val future = movie(3, "2026-09-10")
+        val unknown = movie(4, "")
+        val bad = movie(5, "2026-99-99")
+        val series = movie(6, "2026-10-01").copy(mediaType = "tv")
+        val items = listOf(past, now, future, future, unknown, bad, series)
+        assertEquals(listOf(future), filterSectionItems("Coming soon", items, today))
+        assertEquals(listOf(past, now), filterSectionItems("Now in cinemas", items, today))
+        assertTrue(filterSectionItems("Coming soon", items, today.plusDays(1)).isEmpty())
+        val path = catalogPath(CatalogRepository.specs.single { it.title == "Coming soon" }, today)
+        assertTrue(path.startsWith("/discover/movie?"))
+        assertTrue(path.contains("primary_release_date.gte=2026-09-10"))
+        assertTrue(path.contains("primary_release_date.lte=2027-03-09"))
+    }
+
+    @Test
+    fun metadataCacheEvictsLeastRecentlyUsedEntries() {
+        val cache = boundedCache<String, Int>(2)
+        cache["first"] = 1
+        cache["second"] = 2
+        assertEquals(1, cache["first"])
+        cache["third"] = 3
+        assertEquals(setOf("first", "third"), cache.keys)
+        repeat(100) { cache["item-$it"] = it }
+        assertEquals(2, cache.size)
+    }
+
+    @Test(expected = kotlinx.coroutines.CancellationException::class)
+    fun cancelledRequestsMustNotBecomeFallbackResults() {
+        requestResult<Unit> { throw kotlinx.coroutines.CancellationException("Screen closed") }
+            .getOrDefault(Unit)
+    }
+
+    @Test
+    fun failedRequestsStillAllowAnOfflineFallback() {
+        assertEquals("offline", requestResult<String> { throw java.io.IOException("Disconnected") }.getOrDefault("offline"))
+    }
+
+    @Test
+    fun movieAndSeriesWithSameIdKeepSeparateIdentity() {
+        val movie = MediaItem(42, "Movie", "", "2026", 8.0, 1, "movie", null, null)
+        val series = movie.copy(mediaType = "tv", title = "Series")
+        assertTrue(mediaKey(movie) != mediaKey(series))
+        assertEquals(2, launcherMovieSections(CatalogResult(listOf(CatalogSection(0, "Trending this week", listOf(movie, series))), false)).single().items.size)
+        assertTrue(launcherMovieSections(CatalogResult(emptyList(), false)).isEmpty())
+    }
+
+    @Test
     fun catalogRoutesCoverDistinctTvSections() {
         val specs = CatalogRepository.specs
         assertEquals(5, CatalogRepository.pageTitles.size)
@@ -37,12 +97,12 @@ class CatalogRepositoryTest {
     }
 
     @Test
-    fun detailsAlwaysProvideUsefulFallbackContent() = runBlocking {
+    fun failedDetailsDoNotInventCastOrRuntime() = runBlocking {
         val item = MediaItem(1, "Test", "Description", "2026", 8.0, 100, "movie", null, null)
         val details = CatalogRepository.details(item)
-        assertTrue(details.runtime.isNotBlank())
-        assertTrue(details.genres.isNotBlank())
-        assertTrue(details.cast.isNotEmpty())
+        assertTrue(details.runtime.isBlank())
+        assertTrue(details.genres.isBlank())
+        assertTrue(details.cast.isEmpty())
         assertTrue(details.trailer == null)
         assertTrue(details.backdrops.isEmpty())
     }

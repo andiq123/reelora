@@ -8,14 +8,21 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URLEncoder
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 
 @Immutable
 data class MediaItem(
@@ -69,7 +76,7 @@ data class WeatherPlace(
 }
 
 object WeatherRepository {
-    suspend fun locations(query: String): List<WeatherPlace> = runCatching {
+    suspend fun locations(query: String): List<WeatherPlace> = requestResult {
         val name = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString())
         val results = readJson("https://geocoding-api.open-meteo.com/v1/search?name=$name&count=5&language=en")
             .optJSONArray("results") ?: return emptyList()
@@ -88,7 +95,7 @@ object WeatherRepository {
         }
     }.getOrDefault(emptyList())
 
-    suspend fun current(location: String, celsius: Boolean, latitude: Double? = null, longitude: Double? = null): WeatherNow? = runCatching {
+    suspend fun current(location: String, celsius: Boolean, latitude: Double? = null, longitude: Double? = null): WeatherNow? = requestResult {
         val place = if (latitude != null && longitude != null) latitude to longitude else {
             locations(location).firstOrNull()?.let { it.latitude to it.longitude } ?: return null
         }
@@ -109,9 +116,9 @@ object FootballRepository {
         val matches = leagues.mapIndexed { priority, (id, name) ->
             async {
                 coroutineScope {
-                    val live = async { runCatching { readJson("$BASE/eventsday.php?d=$today&l=$id").liveFootballMatch(name, priority) }.getOrNull() }
-                    val next = async { runCatching { readJson("$BASE/eventsnextleague.php?id=$id").firstFootballMatch(name, priority) }.getOrNull() }
-                    val previous = async { runCatching { readJson("$BASE/eventspastleague.php?id=$id").firstFootballMatch(name, priority) }.getOrNull() }
+                    val live = async { requestResult { readJson("$BASE/eventsday.php?d=$today&l=$id").liveFootballMatch(name, priority) }.getOrNull() }
+                    val next = async { requestResult { readJson("$BASE/eventsnextleague.php?id=$id").firstFootballMatch(name, priority) }.getOrNull() }
+                    val previous = async { requestResult { readJson("$BASE/eventspastleague.php?id=$id").firstFootballMatch(name, priority) }.getOrNull() }
                     listOf(live.await(), next.await(), previous.await())
                 }
             }
@@ -157,8 +164,10 @@ internal fun isLiveFootballStatus(status: String): Boolean {
 }
 
 object CatalogRepository {
-    private val personCredits = ConcurrentHashMap<Int, List<MediaItem>>()
-    private val mediaDetails = ConcurrentHashMap<String, MediaDetails>()
+    private val personCredits = boundedCache<Int, List<MediaItem>>(24)
+    private val mediaDetails = boundedCache<String, MediaDetails>(48)
+    @Volatile private var cachedCatalog: Pair<LocalDate, CatalogResult>? = null
+    @Volatile private var cachedAt = 0L
     val pageTitles = listOf("Discover", "In cinemas", "Movies", "TV series", "Animation")
     val configured get() = BuildConfig.TMDB_TOKEN.isNotBlank()
 
@@ -171,20 +180,31 @@ object CatalogRepository {
         CatalogSpec(4, "Popular animation", "/discover/movie?with_genres=16&sort_by=popularity.desc", "movie"),
     )
 
+    fun clearDetailCaches() {
+        personCredits.clear()
+        mediaDetails.clear()
+    }
+
+    fun freshCatalog(): CatalogResult? = cachedCatalog?.takeIf {
+        it.first == LocalDate.now() && System.nanoTime() - cachedAt < TimeUnit.HOURS.toNanos(6)
+    }?.second
+
     suspend fun load(): CatalogResult = withContext(Dispatchers.Default) {
+        val today = LocalDate.now()
+        freshCatalog()?.let { return@withContext it }
         val token = BuildConfig.TMDB_TOKEN.trim()
         if (token.isEmpty()) return@withContext fallback()
 
-        runCatching {
+        requestResult {
             val sections = coroutineScope {
-                specs.map { spec -> async { runCatching { fetch(spec, token) }.getOrNull() } }.awaitAll().filterNotNull()
+                specs.map { spec -> async { requestResult { fetch(spec, token, today) }.getOrNull() } }.awaitAll().filterNotNull()
             }
-            val demo = fallback().sections
             CatalogResult(
-                pageTitles.indices.flatMap { page -> sections.filter { it.page == page }.ifEmpty { demo.filter { it.page == page } } },
+                specs.mapNotNull { spec -> sections.firstOrNull { it.title == spec.title }
+                    ?: cachedCatalog?.second?.sections?.firstOrNull { it.title == spec.title }?.let { it.copy(items = filterSectionItems(it.title, it.items, today)) } },
                 sections.size < specs.size,
             )
-        }.getOrElse { fallback() }
+        }.getOrElse { fallback() }.also { if (!it.isDemo) { cachedCatalog = today to it; cachedAt = System.nanoTime() } }
     }
 
     suspend fun details(item: MediaItem): MediaDetails {
@@ -192,9 +212,9 @@ object CatalogRepository {
         mediaDetails[key]?.let { return it }
         return withContext(Dispatchers.Default) {
         val token = BuildConfig.TMDB_TOKEN.trim()
-        if (token.isEmpty()) return@withContext fallbackDetails(item)
+        if (token.isEmpty()) return@withContext fallbackDetails()
 
-        runCatching {
+        requestResult {
             val creditsKey = if (item.mediaType == "tv") "aggregate_credits" else "credits"
             val json = getJson("/${item.mediaType}/${item.id}?append_to_response=$creditsKey,recommendations,videos,watch/providers,images&include_image_language=en,null", token)
             val runtimeMinutes = if (item.mediaType == "tv") {
@@ -254,19 +274,21 @@ object CatalogRepository {
                     }
                 }.orEmpty(),
             )
-        }.getOrElse { fallbackDetails(item) }
-        }.also { mediaDetails[key] = it }
+        }.onSuccess { mediaDetails[key] = it }.getOrElse { fallbackDetails() }
+        }
     }
 
-    suspend fun search(query: String): List<MediaItem> = withContext(Dispatchers.Default) {
-        val term = query.trim()
-        val token = BuildConfig.TMDB_TOKEN.trim()
-        if (term.length < 2 || token.isEmpty()) return@withContext emptyList()
+    suspend fun search(query: String): List<MediaItem> = searchResult(query).getOrDefault(emptyList())
 
-        runCatching {
+    suspend fun searchResult(query: String): Result<List<MediaItem>> = withContext(Dispatchers.Default) {
+        val term = query.trim()
+        if (term.length < 2) return@withContext Result.success(emptyList())
+        requestResult {
+            val token = BuildConfig.TMDB_TOKEN.trim()
+            check(token.isNotEmpty()) { "Search is not configured" }
             val encoded = URLEncoder.encode(term, StandardCharsets.UTF_8.toString())
             parseItems(getJson("/search/multi?query=$encoded", token).getJSONArray("results"), "movie")
-        }.getOrDefault(emptyList())
+        }
     }
 
     suspend fun credits(personId: Int): List<MediaItem> = withContext(Dispatchers.Default) {
@@ -275,29 +297,29 @@ object CatalogRepository {
         val token = BuildConfig.TMDB_TOKEN.trim()
         if (token.isEmpty()) return@withContext emptyList()
 
-        val result = runCatching {
+        val result = requestResult {
             parseItems(getJson("/person/$personId/combined_credits", token).getJSONArray("cast"), "movie", 100)
                 .distinctBy { "${it.mediaType}-${it.id}" }
                 .sortedByDescending { it.voteCount }
                 .take(12)
-        }.getOrDefault(emptyList())
-        personCredits[personId] = result
+        }.onSuccess { personCredits[personId] = it }.getOrDefault(emptyList())
         result
     }
 
-    private suspend fun fetch(spec: CatalogSpec, token: String): CatalogSection {
-        val results = getJson(spec.path, token).getJSONArray("results")
-        return CatalogSection(spec.page, spec.title, parseItems(results, spec.mediaType))
+    private suspend fun fetch(spec: CatalogSpec, token: String, today: LocalDate): CatalogSection {
+        val results = getJson(catalogPath(spec, today), token).getJSONArray("results")
+        return CatalogSection(spec.page, spec.title, filterSectionItems(spec.title, parseItems(results, spec.mediaType), today))
     }
 
-    private fun parseItems(results: JSONArray, defaultType: String, limit: Int = 18) = buildList {
+    private fun parseItems(results: JSONArray, defaultType: String, limit: Int = 18) = buildList<MediaItem> {
             for (index in 0 until results.length()) {
                 val item = results.getJSONObject(index)
                 val type = item.optString("media_type", defaultType)
-                if (type == "person") continue
-                val title = item.optString("title").ifBlank { item.optString("name") }
+                if (type !in setOf("movie", "tv") || item.optBoolean("adult")) continue
+                val title = item.text("title").ifBlank { item.text("name") }
                 if (title.isBlank()) continue
-                val date = item.optString("release_date").ifBlank { item.optString("first_air_date") }
+                val date = item.text("release_date").ifBlank { item.text("first_air_date") }
+                if (any { it.id == item.optInt("id") && it.mediaType == type }) continue
                 add(
                     MediaItem(
                         id = item.getInt("id"),
@@ -324,53 +346,54 @@ object CatalogRepository {
     private fun JSONObject.image(key: String, size: String) =
         optString(key).takeIf { it.isNotBlank() && it != "null" }?.let { "https://image.tmdb.org/t/p/$size$it" }
 
-    private fun fallback(): CatalogResult {
-        val demos = listOf(
-            MediaItem(1, "Midnight Signal", "A mysterious transmission pulls a quiet coastal town into an impossible adventure.", "2026", 8.4, 1842, "movie", null, null),
-            MediaItem(2, "Orbital", "A rescue crew races the sunrise above Earth.", "2026", 8.1, 936, "movie", null, null),
-            MediaItem(3, "The Last Archive", "Two investigators uncover stories that were meant to disappear.", "2025", 7.9, 2411, "tv", null, null),
-            MediaItem(4, "Paper Kingdom", "An inventive animated journey through a world folded from memories.", "2026", 8.7, 3204, "movie", null, null),
-            MediaItem(5, "Northbound", "A family road trip becomes a warm, unexpected second chance.", "2025", 7.8, 714, "movie", null, null),
-            MediaItem(6, "Afterlight", "Survivors build a new city where night never fully arrives.", "2026", 8.2, 1630, "tv", null, null),
-            MediaItem(7, "Static Summer", "Old friends reunite when their forgotten radio show returns on air.", "2025", 7.6, 583, "movie", null, null),
-            MediaItem(8, "Tiny Giants", "Small creatures embark on a very big animated expedition.", "2026", 8.5, 1206, "movie", null, null),
-        )
-        return CatalogResult(
-            specs.mapIndexed { index, spec -> CatalogSection(spec.page, spec.title, List(demos.size) { demos[(it + index) % demos.size] }) },
-            true,
-        )
-    }
+    private fun fallback() = CatalogResult(emptyList(), true)
 
-    private fun fallbackDetails(item: MediaItem) = MediaDetails(
-        runtime = if (item.mediaType == "tv") "45 min episodes" else "112 min",
-        genres = if (item.mediaType == "tv") "Drama · Mystery" else "Adventure · Drama",
-        cast = listOf(
-            CastMember(0, "Alex Morgan", "Lead", null),
-            CastMember(0, "Maya Chen", "Co-star", null),
-            CastMember(0, "Noah Williams", "Supporting", null),
-            CastMember(0, "Sofia Reyes", "Supporting", null),
-            CastMember(0, "Leo Martin", "Guest", null),
-        ),
-        similar = emptyList(),
-        trailer = null,
-        availability = null,
-        backdrops = emptyList(),
-    )
+    private fun fallbackDetails() = MediaDetails("", "", emptyList(), emptyList(), null, null, emptyList())
+
 }
 
-private suspend fun readJson(url: String, token: String? = null) = withContext(Dispatchers.IO) {
-    val connection = URL(url).openConnection() as HttpURLConnection
-    connection.connectTimeout = 5_000
-    connection.readTimeout = 5_000
-    token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
-    connection.setRequestProperty("Accept", "application/json")
-    try {
-        check(connection.responseCode in 200..299) { "Request failed: ${connection.responseCode}" }
-        JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-    } finally {
-        connection.disconnect()
+// Reuse connections and cancel the socket when a search or screen is abandoned.
+private val apiClient = OkHttpClient.Builder()
+    .connectTimeout(5, TimeUnit.SECONDS)
+    .readTimeout(5, TimeUnit.SECONDS)
+    .callTimeout(10, TimeUnit.SECONDS)
+    .build()
+
+internal suspend fun readJson(url: String, token: String? = null): JSONObject =
+    suspendCancellableCoroutine { continuation ->
+        val request = Request.Builder().url(url).header("Accept", "application/json")
+        token?.let { request.header("Authorization", "Bearer $it") }
+        val call = apiClient.newCall(request.build())
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                continuation.resumeWith(Result.failure(e))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resumeWith(requestResult {
+                    response.use {
+                        check(it.isSuccessful) { "Request failed: ${it.code}" }
+                        JSONObject(checkNotNull(it.body).string())
+                    }
+                })
+            }
+        })
     }
+
+internal inline fun <T> requestResult(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Exception) {
+    Result.failure(error)
 }
+
+// Entry counts bound metadata retained by this long-lived launcher process.
+internal fun <K, V> boundedCache(capacity: Int): MutableMap<K, V> =
+    Collections.synchronizedMap(object : LinkedHashMap<K, V>(capacity, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?) = size > capacity
+    })
 
 internal fun releaseLabel(date: String, today: LocalDate = LocalDate.now()): String {
     val release = runCatching { LocalDate.parse(date) }.getOrNull() ?: return "DATE TBA"
@@ -390,3 +413,23 @@ internal fun cardReleaseLabel(date: String, today: LocalDate = LocalDate.now()):
             ?.substringBefore(',')
             ?.let { "◷ $it" }
     }
+
+private fun JSONObject.text(key: String) = optString(key).takeUnless { it == "null" }.orEmpty()
+
+internal fun catalogPath(spec: CatalogSpec, today: LocalDate): String = if (spec.title == "Coming soon") {
+    "/discover/movie?primary_release_date.gte=${today.plusDays(1)}&primary_release_date.lte=${today.plusMonths(6)}&sort_by=popularity.desc&include_video=false"
+} else spec.path
+
+internal fun filterSectionItems(title: String, items: List<MediaItem>, today: LocalDate): List<MediaItem> =
+    items.distinctBy { "${it.mediaType}-${it.id}" }.filter { item ->
+        val date = runCatching { LocalDate.parse(item.releaseDate) }.getOrNull()
+        when (title) {
+            "Coming soon" -> item.mediaType == "movie" && date != null && date.isAfter(today)
+            "Now in cinemas" -> item.mediaType == "movie" && date != null && !date.isAfter(today)
+            else -> true
+        }
+    }
+
+internal fun mediaRating(item: MediaItem): String =
+    if (item.voteCount <= 0 || !item.score.isFinite() || item.score <= 0.0) "Not rated"
+    else "★ ${"%.1f".format(Locale.US, item.score)}"
