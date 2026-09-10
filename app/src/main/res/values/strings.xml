@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Reelora TV</string>
     <string name="tmdb_attribution">This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+    <string name="device_settings_unavailable">Device settings are unavailable on this TV</string>
 </resources>

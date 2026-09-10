@@ -2,6 +2,7 @@ package tv.reelora.app
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.os.Build
@@ -195,7 +196,7 @@ private val RomanianUi = mapOf(
     "Movies on" to "Filme pornite", "Apps only" to "Doar aplicații", "New wallpaper" to "Fundal nou",
     "Football on" to "Fotbal pornit", "Football off" to "Fotbal oprit", "Theater on" to "Cinema pornit",
     "Theater off" to "Cinema oprit", "Daily wallpaper · Picsum" to "Fundal zilnic · Picsum",
-    "Default home" to "Launcher implicit", "Android" to "Android", "English" to "English", "Română" to "Română",
+    "Default home" to "Launcher implicit", "Device settings" to "Setările dispozitivului", "Network, display, sound and Android system" to "Rețea, imagine, sunet și sistem Android", "English" to "English", "Română" to "Română",
     "App options" to "Opțiuni aplicație", "Move" to "Mută", "Reorder on Home" to "Reordonează pe Acasă",
     "Rename" to "Redenumește", "Shelf label" to "Nume pe raft", "App info" to "Informații",
     "Manage or uninstall" to "Gestionează aplicația", "Hide" to "Ascunde", "Remove from Home" to "Elimină de pe Acasă",
@@ -262,6 +263,22 @@ private data class LauncherApp(
     val icon: android.graphics.drawable.Drawable,
     val banner: android.graphics.drawable.Drawable?,
 )
+
+// System screens must not join the launcher's Home task: Home redirects can clear it.
+private fun Context.openAndroidSettings(action: String = Settings.ACTION_SETTINGS, data: Uri? = null) {
+    for (candidate in listOf(action, Settings.ACTION_SETTINGS).distinct()) {
+        try {
+            startActivity(Intent(candidate, if (candidate == action) data else null)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        } catch (_: ActivityNotFoundException) {
+            // Some TV vendors do not expose the requested settings page.
+        } catch (_: SecurityException) {
+            // Fall back to the public settings entry when a vendor restricts a page.
+        }
+    }
+    android.widget.Toast.makeText(this, getString(R.string.device_settings_unavailable), android.widget.Toast.LENGTH_SHORT).show()
+}
 
 // App-icon launches enter the same Home task without constructing a second Compose tree.
 class LauncherEntryActivity : Activity() {
@@ -647,11 +664,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         hiddenFromSettings = true
                         hiddenAppsOpen = true
                     },
-                    onSystemSettings = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) },
-                    onHomeSettings = {
-                        runCatching { context.startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
-                            .getOrElse { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
-                    },
+                    onSystemSettings = { context.openAndroidSettings() },
+                    onHomeSettings = { context.openAndroidSettings(Settings.ACTION_HOME_SETTINGS) },
                     onDismiss = { settingsOpen = false },
                 )
                 if (weatherLocationOpen) WeatherLocationDialog(
@@ -697,8 +711,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         },
                         onAppInfo = {
                             configuredApp = null
-                            context.startActivity(
-                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.component.packageName}")),
+                            context.openAndroidSettings(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.component.packageName}"),
                             )
                         },
                         onHide = {
@@ -2111,10 +2125,9 @@ private fun SettingsDialog(
                         }
                         3 -> {
                             Text(tr("Home and Android controls"), color = Color.White, fontSize = 21.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                                ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
-                                ActionButton("Android", icon = Icons.Default.Settings, onClick = onSystemSettings)
-                            }
+                            ActionButton("Device settings", Modifier.fillMaxWidth(), icon = Icons.Default.Settings, onClick = onSystemSettings)
+                            Text(tr("Network, display, sound and Android system"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                            ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
                             ActionButton(if (romanian) "Română" else "English") { onLanguage(!romanian) }
                         }
                     }

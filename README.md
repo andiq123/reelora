@@ -96,3 +96,9 @@ Removed the unconditional AV1-blocking script from the embedded YouTube player. 
 Hero Down now returns to the last focused dock item, including Search, Hidden, and Settings. It brings that item into view before requesting focus, so scrolling to the right end of a lazy row cannot leave the hero pointing to a disposed first app. App identity is retained across reordering, with a safe fallback after removal. Moving up from movie rows preserves the dock position; moving down again restores the previous first-row movie position.
 
 Run `python3 scripts/check-tv-navigation.py SERIAL` with `adb` on PATH and movie Home enabled to check repeated far-right dock/movie round trips.
+
+## Native device settings in 0.24.3
+
+Settings → System → **Device settings** opens the TV's own network, display, sound, and system controls. Native settings, Default home, and App info open outside Reelora's Home task, so a Home-task redirect cannot clear their screens. Back preserves Reelora's settings position. Unsupported vendor pages fall back to the main device settings, with a message if neither is available.
+
+Run `python3 scripts/check-device-settings.py SERIAL` with `adb` on PATH to check native settings task isolation, navigation, and return on a TV using the English interface.
