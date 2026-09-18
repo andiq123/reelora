@@ -60,6 +60,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -167,8 +168,9 @@ private val ControlShape = RoundedCornerShape(12.dp)
 private val Gap = 12.dp
 private val GapLarge = 24.dp
 private val DialogPadding = 28.dp
-private val LocalRomanian = staticCompositionLocalOf { false }
+internal val LocalRomanian = staticCompositionLocalOf { false }
 private val LocalDialogReady = staticCompositionLocalOf { false }
+internal val LocalInternet = staticCompositionLocalOf { false }
 private val LocalForeground = staticCompositionLocalOf { true }
 
 private val RomanianUi = mapOf(
@@ -186,7 +188,9 @@ private val RomanianUi = mapOf(
     "Update could not be verified · try again" to "Actualizarea nu poate fi instalată · verifică conexiunea și versiunea",
     "Discover" to "Descoperă", "Explore" to "Explorează", "YOUR APPS" to "APLICAȚIILE TALE",
     "Your apps, ready" to "Aplicațiile tale sunt gata",
-    "Settings" to "Setări", "A quiet home for apps and discovery" to "Un spațiu calm pentru aplicații și descoperire",
+    "Football" to "Fotbal", "Upcoming" to "Urmează", "Finished" to "Încheiat", "Previous" to "Anterior", "Live" to "În direct",
+    "Settings" to "Setări", "Waiting for internet" to "Așteptăm conexiunea", "Updating weather" to "Actualizăm vremea", "Loading weather" to "Se încarcă vremea",
+    "Clear sky" to "Cer senin", "Clear night" to "Noapte senină", "Partly cloudy" to "Parțial noros", "Cloudy" to "Noros", "Fog" to "Ceață", "Rain" to "Ploaie", "Snow" to "Ninsoare", "Thunderstorm" to "Furtună", "Weather unavailable" to "Vreme indisponibilă", "A quiet home for apps and discovery" to "Un spațiu calm pentru aplicații și descoperire",
     "APP SHELF" to "APLICAȚII", "Find and manage Home apps" to "Găsește și organizează aplicațiile",
     "HOME" to "ACASĂ", "Featured movies or a calm wallpaper" to "Filme recomandate sau un fundal calm",
     "WEATHER & TIME" to "VREME ȘI ORĂ", "Location, temperature and clock" to "Locație, temperatură și ceas",
@@ -347,8 +351,9 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
     val preferences = remember { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
     var romanian by remember { mutableStateOf(preferences.getBoolean("romanian", false)) }
     val isForeground by foreground.collectAsState()
+    val online = rememberInternetAvailable(isForeground)
     val updateStatus by updater.status.collectAsState()
-    CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground) { MaterialTheme(
+    CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground, LocalInternet provides online) { MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Violet,
             secondary = Coral,
@@ -459,8 +464,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 theaterReturn = null
             }
         }
-        LaunchedEffect(isForeground, moviesEnabled, searching, appsReady) {
-            if (!isForeground || !appsReady || (!moviesEnabled && !searching)) return@LaunchedEffect
+        LaunchedEffect(isForeground, online, moviesEnabled, searching, appsReady) {
+            if (!isForeground || !online || !appsReady || (!moviesEnabled && !searching)) return@LaunchedEffect
             withFrameNanos { }
             delay(750)
             var retryDelay = 10_000L
@@ -478,10 +483,11 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
             weather = null
             weatherState = WeatherLoadState.Loading
         }
-        LaunchedEffect(isForeground, weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude, appsReady) {
-            if (!isForeground || !appsReady) return@LaunchedEffect
+        LaunchedEffect(isForeground, online, weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude, appsReady) {
+            if (!isForeground || !online || !appsReady) return@LaunchedEffect
+            weatherRefreshAt = SystemClock.elapsedRealtime() + widgetRefreshDelay(SystemClock.elapsedRealtime(), weatherRefreshAt, weatherState != WeatherLoadState.Ready)
             withFrameNanos { }
-            delay(750)
+            delay(250)
             while (true) {
                 delay((weatherRefreshAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
                 val latest = WeatherRepository.current(weatherLocation, weatherCelsius, weatherLatitude, weatherLongitude)
@@ -1292,17 +1298,19 @@ private fun AppsOnlyHome(
         initiallyFocused = true
     }
     val isForeground = LocalForeground.current
+    val online = LocalInternet.current
     var footballRefreshAt by remember { mutableStateOf(0L) }
-    LaunchedEffect(footballWidgetEnabled, isForeground) {
-        if (!footballWidgetEnabled || !isForeground) return@LaunchedEffect
+    LaunchedEffect(footballWidgetEnabled, isForeground, online, appsReady) {
+        if (!footballWidgetEnabled || !isForeground || !online || !appsReady) return@LaunchedEffect
+        footballRefreshAt = SystemClock.elapsedRealtime() + widgetRefreshDelay(SystemClock.elapsedRealtime(), footballRefreshAt, footballState != WeatherLoadState.Ready)
         withFrameNanos { }
-        delay(750)
+        delay(250)
         while (true) {
             delay((footballRefreshAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
             val latest = FootballRepository.load()
             if (latest != null) football = latest
-            footballState = if (football == null) WeatherLoadState.Error else WeatherLoadState.Ready
-            footballRefreshAt = SystemClock.elapsedRealtime() + if (latest == null) 60_000L else 2 * 60_000L
+            footballState = if (latest == null) WeatherLoadState.Error else WeatherLoadState.Ready
+            footballRefreshAt = SystemClock.elapsedRealtime() + if (latest == null) 60_000L else footballRefreshInterval(latest)
         }
     }
     Box(
@@ -1320,7 +1328,7 @@ private fun AppsOnlyHome(
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Background.copy(alpha = .60f), Color.Transparent, Background.copy(alpha = .68f)))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Background.copy(alpha = .70f), .40f to Background.copy(alpha = .42f), .70f to Color.Transparent, 1f to Background.copy(alpha = .68f))))
         HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp))
         if (footballWidgetEnabled) FootballWidget(
             football,
@@ -1351,52 +1359,49 @@ private fun AppsOnlyHome(
     }
 }
 
+private val FootballTextStyle = androidx.compose.ui.text.TextStyle(
+    shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = .6f), androidx.compose.ui.geometry.Offset(0f, 1f), 3f),
+)
+
 @Composable
-private fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState, modifier: Modifier = Modifier) {
-    Column(
-        modifier.fillMaxWidth(.70f).clip(RoundedCornerShape(24.dp))
-            .background(Brush.linearGradient(listOf(Color(0xD92D3340), Color(0xCC171B24))))
-            .border(1.dp, Color.White.copy(alpha = .16f), RoundedCornerShape(24.dp))
-            .padding(horizontal = 24.dp, vertical = 18.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp)).background(Violet), contentAlignment = Alignment.Center) {
-                Text("⚽", color = Background, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(tr("TOP FOOTBALL"), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp)
-            snapshot?.live?.let {
-                Spacer(Modifier.width(12.dp))
-                Row(
-                    Modifier.clip(RoundedCornerShape(50)).background(Coral.copy(alpha = .18f)).padding(horizontal = 9.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(Coral))
-                    Spacer(Modifier.width(6.dp))
-                    Text(tr("LIVE"), color = Coral, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-            }
+internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState, modifier: Modifier = Modifier) {
+    val softWhite = Color(0xFFE9E8E3)
+    Column(modifier.widthIn(max = 490.dp).fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(androidx.compose.ui.res.painterResource(R.drawable.football_ball), contentDescription = null,
+                tint = softWhite.copy(alpha = .8f), modifier = Modifier.size(20.dp))
+            Text(tr("Football"), color = softWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium, style = FootballTextStyle)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         AnimatedContent(
-            targetState = state to snapshot,
-            transitionSpec = {
-                (slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 12 } + fadeIn(tween(180))) togetherWith
-                    (slideOutHorizontally(tween(150)) { -it / 16 } + fadeOut(tween(120)))
-            },
+            targetState = snapshot,
+            transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) },
             label = "football update",
-        ) { (shownState, shown) ->
-            when (shownState) {
-                WeatherLoadState.Loading -> Text(tr("Loading fixtures…"), color = Color.White.copy(alpha = .66f), fontSize = 15.sp)
-                WeatherLoadState.Error -> Text(tr("Fixtures unavailable · retrying"), color = Coral, fontSize = 15.sp)
-                WeatherLoadState.Ready -> Column {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        shown?.live?.let { FootballMatchSummary("LIVE · ${it.competition} · ${it.status}", it, Modifier.weight(1f), true) }
-                        FootballMatchSummary("NEXT", shown?.next, Modifier.weight(1f))
-                        FootballMatchSummary("LAST", shown?.previous, Modifier.weight(1f))
+        ) { shown ->
+            if (shown == null) {
+                Text(tr(if (!LocalInternet.current) "Waiting for internet" else if (state == WeatherLoadState.Error) "Fixtures unavailable · retrying" else "Loading fixtures…"),
+                    color = softWhite.copy(alpha = .85f), fontSize = 17.sp, style = FootballTextStyle)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (shown.live != null) {
+                        FootballMatchSummary("Live", shown.live, live = true)
+                        if (shown.next != null) {
+                            FootballGroupDivider()
+                            FootballMatchSummary("Upcoming", shown.next)
+                        }
+                    } else {
+                        if (shown.next != null) FootballMatchSummary("Upcoming", shown.next)
+                        if (shown.previous != null) {
+                            if (shown.next != null) FootballGroupDivider()
+                            FootballMatchSummary("Previous", shown.previous)
+                        }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text(footballHintText(shown?.hint, LocalRomanian.current), color = Violet.copy(alpha = .82f), fontSize = 10.sp, maxLines = 1)
+                    if (state == WeatherLoadState.Error || shown.hint != null) {
+                        Text(
+                            if (state == WeatherLoadState.Error) tr("Fixtures unavailable · retrying") else footballHintText(shown.hint, LocalRomanian.current),
+                            color = softWhite.copy(alpha = .72f), fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, style = FootballTextStyle,
+                        )
+                    }
                 }
             }
         }
@@ -1404,27 +1409,53 @@ private fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState,
 }
 
 @Composable
-private fun FootballMatchSummary(label: String, match: FootballMatch?, modifier: Modifier = Modifier, live: Boolean = false) {
-    Column(modifier) {
-        Text(
-            tr(if (!live && match?.competition?.isNotBlank() == true) "$label · ${match.competition}" else label),
-            color = if (live) Coral else Color.White.copy(alpha = .46f),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Text(
-            match?.let { "${it.home}  ${footballScore(it)}  ${it.away}" } ?: "No fixture",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        match?.let {
-            val locale = if (LocalRomanian.current) java.util.Locale.forLanguageTag("ro") else java.util.Locale.ENGLISH
-            Text(footballSchedule(it, locale), color = Color.White.copy(alpha = .58f), fontSize = 11.sp, maxLines = 1)
+private fun FootballGroupDivider() {
+    Box(Modifier.fillMaxWidth(.78f).height(1.dp).background(
+        Brush.horizontalGradient(listOf(Color.White.copy(alpha = .18f), Color.White.copy(alpha = .03f))),
+    ))
+}
+
+@Composable
+private fun FootballMatchSummary(label: String, match: FootballMatch, live: Boolean = false) {
+    val accent = if (live) Color(0xFFA8E4C3) else Color(0xFFE9E8E3)
+    val secondary = Color(0xFFD1D5D6)
+    val statusColor = if (live) accent else if (label == "Upcoming") Color(0xFFB6D6F4) else Color(0xFFD0C6E4)
+    val locale = if (LocalRomanian.current) java.util.Locale.forLanguageTag("ro") else java.util.Locale.ENGLISH
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.clip(RoundedCornerShape(7.dp)).background(statusColor.copy(alpha = .10f))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                when {
+                    live -> Box(Modifier.size(6.dp).background(statusColor, CircleShape))
+                    label == "Previous" -> Icon(Icons.Default.Check, contentDescription = null, tint = statusColor, modifier = Modifier.size(13.dp))
+                    else -> Icon(androidx.compose.ui.res.painterResource(R.drawable.fixture_calendar), contentDescription = null,
+                        tint = statusColor, modifier = Modifier.size(13.dp))
+                }
+                Text(tr(label), color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = FootballTextStyle)
+            }
+            if (match.competition.isNotBlank()) {
+                Text("·", color = secondary, fontSize = 12.sp)
+                Text(match.competition.lowercase().split(' ').joinToString(" ") { it.replaceFirstChar(Char::uppercase) },
+                    color = secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
+            }
         }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(match.home, Modifier.weight(1f, fill = false),
+                color = Color.White, fontSize = 22.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
+            Text(footballScore(match), Modifier.widthIn(min = 32.dp).clip(RoundedCornerShape(8.dp))
+                .background(accent.copy(alpha = if (live) .12f else if (match.homeScore != null) .06f else 0f)).padding(horizontal = 8.dp, vertical = 3.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = accent,
+                fontSize = if (match.homeScore == null || match.awayScore == null) 16.sp else 22.sp,
+                fontWeight = FontWeight.SemiBold, style = FootballTextStyle)
+            Text(match.away, Modifier.weight(1f, fill = false), color = Color.White, fontSize = 22.sp, lineHeight = 26.sp,
+                fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
+        }
+        Text(footballSchedule(match, locale), color = secondary.copy(alpha = .85f), fontSize = 12.sp,
+            lineHeight = 16.sp, maxLines = 2, style = FootballTextStyle)
     }
 }
 
@@ -1441,9 +1472,9 @@ internal fun footballHintText(hint: FootballHint?, romanian: Boolean): String {
     if (hint == null) return if (romanian) "Urmărim World Cup, Champions League și Premier League" else "Following World Cup, Champions League and Premier League"
     val competition = hint.competition.lowercase().split(' ').joinToString(" ") { it.replaceFirstChar(Char::uppercase) }
     return when (hint.days) {
-        0 -> if (romanian) "$competition începe azi" else "$competition starts today"
-        1 -> if (romanian) "$competition începe mâine" else "$competition starts tomorrow"
-        else -> if (romanian) "$competition se apropie · ${hint.days} zile" else "$competition is approaching · ${hint.days} days"
+        0 -> if (romanian) "$competition · azi" else "$competition · today"
+        1 -> if (romanian) "$competition · mâine" else "$competition · tomorrow"
+        else -> if (romanian) "$competition · în ${hint.days} zile" else "$competition · in ${hint.days} days"
     }
 }
 
@@ -2400,7 +2431,7 @@ private fun LauncherStage(
 }
 
 @Composable
-private fun HomeStatus(
+internal fun HomeStatus(
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
@@ -2421,12 +2452,28 @@ private fun HomeStatus(
             formatHomeTime(time, use24HourClock), color = Color.White, fontSize = 28.sp,
             fontWeight = FontWeight.Medium, letterSpacing = (-.5).sp,
         )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            localizeUi(weatherStatusText(weather, weatherState), LocalRomanian.current),
-            color = if (weatherState == WeatherLoadState.Error) Coral else Color.White.copy(alpha = .78f),
-            fontSize = 13.sp,
-        )
+        Spacer(Modifier.height(6.dp))
+        AnimatedContent(
+            targetState = weather,
+            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) },
+            label = "weather update",
+        ) { shown ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                val kind = shown?.let { weatherKind(it.code, it.isDay) } ?: WeatherKind.Unknown
+                if (shown == null) {
+                    Icon(Icons.Default.Refresh, contentDescription = tr("Loading weather"), tint = Color(0xFFB4D8FF), modifier = Modifier.size(32.dp))
+                } else {
+                    Icon(androidx.compose.ui.res.painterResource(kind.icon), contentDescription = tr(kind.label),
+                        tint = Color(kind.color), modifier = Modifier.size(32.dp))
+                }
+                Text(shown?.let { "${it.temperature}°" } ?: "—°", color = Color.White, fontSize = 27.sp,
+                    fontWeight = FontWeight.Medium, style = FootballTextStyle)
+            }
+        }
+        if (weather == null || weatherState == WeatherLoadState.Error) {
+            Text(tr(if (!LocalInternet.current) "Waiting for internet" else if (weatherState == WeatherLoadState.Error) "Updating weather" else "Loading weather"),
+                color = Color.White.copy(alpha = .85f), fontSize = 13.sp, style = FootballTextStyle)
+        }
     }
 }
 

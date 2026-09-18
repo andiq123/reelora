@@ -204,7 +204,7 @@ class CatalogRepositoryTest {
         val premierLeague = scheduled.copy(date = "2026-08-28", priority = 2)
         val worldCup = scheduled.copy(date = "2030-06-08", priority = 0)
         assertEquals(premierLeague, selectNextFootballMatch(listOf(worldCup, premierLeague)))
-        assertEquals("World Cup începe mâine", footballHintText(FootballHint("WORLD CUP", 1), true))
+        assertEquals("World Cup · mâine", footballHintText(FootballHint("WORLD CUP", 1), true))
         assertEquals("CHAMPIONS LEAGUE", localizeUi("CHAMPIONS LEAGUE", true))
     }
 }

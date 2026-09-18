@@ -60,7 +60,7 @@ data class MediaDetails(
 @Immutable data class CatalogSection(val page: Int, val title: String, val items: List<MediaItem>)
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
-@Immutable data class WeatherNow(val temperature: Int, val code: Int)
+@Immutable data class WeatherNow(val temperature: Int, val code: Int, val isDay: Boolean = true)
 @Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "", val competition: String = "", val priority: Int = 99)
 @Immutable data class FootballHint(val competition: String, val days: Int)
 @Immutable data class FootballSnapshot(val live: FootballMatch?, val next: FootballMatch?, val previous: FootballMatch?, val hint: FootballHint? = null)
@@ -76,6 +76,7 @@ data class WeatherPlace(
 }
 
 object WeatherRepository {
+    private val coordinates = boundedCache<String, Pair<Double, Double>>(8)
     suspend fun locations(query: String): List<WeatherPlace> = requestResult {
         val name = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString())
         val results = readJson("https://geocoding-api.open-meteo.com/v1/search?name=$name&count=5&language=en")
@@ -97,13 +98,15 @@ object WeatherRepository {
 
     suspend fun current(location: String, celsius: Boolean, latitude: Double? = null, longitude: Double? = null): WeatherNow? = requestResult {
         val place = if (latitude != null && longitude != null) latitude to longitude else {
-            locations(location).firstOrNull()?.let { it.latitude to it.longitude } ?: return null
+            coordinates[location] ?: locations(location).firstOrNull()?.let {
+                (it.latitude to it.longitude).also { point -> coordinates[location] = point }
+            } ?: return null
         }
         val unit = if (celsius) "celsius" else "fahrenheit"
         val current = readJson(
-            "https://api.open-meteo.com/v1/forecast?latitude=${place.first}&longitude=${place.second}&current=temperature_2m,weather_code&temperature_unit=$unit",
+            "https://api.open-meteo.com/v1/forecast?latitude=${place.first}&longitude=${place.second}&current=temperature_2m,weather_code,is_day&temperature_unit=$unit",
         ).getJSONObject("current")
-        WeatherNow(current.getDouble("temperature_2m").toInt(), current.getInt("weather_code"))
+        WeatherNow(current.getDouble("temperature_2m").toInt(), current.getInt("weather_code"), current.optInt("is_day", 1) == 1)
     }.getOrNull()
 }
 
@@ -111,7 +114,7 @@ object FootballRepository {
     private const val BASE = "https://www.thesportsdb.com/api/v1/json/123"
     private val leagues = listOf("4429" to "WORLD CUP", "4480" to "CHAMPIONS LEAGUE", "4328" to "PREMIER LEAGUE")
 
-    suspend fun load(): FootballSnapshot? = coroutineScope {
+    suspend fun load(): FootballSnapshot? = withContext(Dispatchers.Default) {
         val today = LocalDate.now()
         val matches = leagues.mapIndexed { priority, (id, name) ->
             async {
@@ -133,6 +136,9 @@ object FootballRepository {
         FootballSnapshot(live, next, previous, hint).takeIf { it.live != null || it.next != null || it.previous != null }
     }
 }
+
+internal fun footballRefreshInterval(snapshot: FootballSnapshot): Long =
+    if (snapshot.live != null || snapshot.next?.date == LocalDate.now().toString()) 2 * 60_000L else 10 * 60_000L
 
 internal fun JSONObject.firstFootballMatch(competition: String = "", priority: Int = 99): FootballMatch? =
     optJSONArray("events")?.optJSONObject(0)?.footballMatch(competition, priority)

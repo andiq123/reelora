@@ -110,3 +110,23 @@ The dock reserves its space during the first app scan, then fades in at the left
 Featured titles draw from current cinema and trending rows. Startup avoids the last featured title when alternatives exist; catalog refreshes retain the current selection while it remains available. Rotation stays paused in the background and behind dialogs. Returning to the dock uses cancellable native smooth scrolling.
 
 Run `python3 scripts/check-cold-start.py SERIAL` with `adb` on PATH and at least one visible app to check three fresh process starts without clearing settings. This does not simulate a full device reboot.
+
+## Widget recovery in 0.24.5
+
+Weather, football, and discovery now share a foreground-only Android default-network listener. Requests wait for validated internet; failed widget loads retry when connectivity returns without a remote press or waiting out their old retry deadline. Leaving Home cancels requests and unregisters the listener. Fresh data keeps its normal refresh deadline and existing content remains visible during refresh.
+
+Weather reuses a bounded cache of resolved coordinates. Football parsing runs off the UI thread, with two-minute updates for live or today's matches and ten-minute updates otherwise (up to 80% fewer quiet-period requests). No polling service, wake lock, or new dependency was added.
+
+The football widget uses a transparent layout, larger team names and scores, readable schedules, and soft blue/mint accents. Compact match rows keep team names close to the score, with calendar, live-dot, and finished-match icons. Updates use a short fade and retain prior results when a refresh fails.
+
+Validated on Xiaomi MiTV-AFMU0 (Android 14): launched Reelora with Wi-Fi disabled, restored Wi-Fi on-device, and observed weather and football populate without remote input. The reconnect check preserves launcher preferences.
+
+Weather uses larger temperatures and native vector icons for clear day/night, partly cloudy day/night, overcast, fog, rain, snow, and storms. A short fade runs only when weather content changes; offline/loading states and retained temperatures remain readable.
+
+The aligned layout was visually checked on the Mi Box at 720p with normal and 1.3× system text size; the original system text size was restored afterward. Unit checks cover every supported weather code, clear/partly-cloudy nights, unknown codes, and missing/zero/double-digit football scores.
+
+### Local widget design loop
+
+The latest refinement removes stretched columns and excess spacing: compact match groups, warm neutral text, restrained status colors, and mint only for live scores. A subtle wallpaper scrim keeps dates readable without a widget panel.
+
+Build `./gradlew assembleDebug`, install the debug APK on a local Android TV emulator, then run `python3 scripts/preview-widgets.py emulator-5554`. The debug-only activity renders the actual production widgets with repeatable fixtures; it and its sample wallpaper are excluded from release APKs. The dock in these previews is illustrative. See [the design review](docs/widget-design-review.md) for iterations and checked states.
