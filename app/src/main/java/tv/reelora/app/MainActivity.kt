@@ -12,6 +12,8 @@ import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.RecognizerIntent
@@ -1443,19 +1445,35 @@ private fun FootballMatchSummary(label: String, match: FootballMatch, live: Bool
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(match.home, Modifier.weight(1f, fill = false),
-                color = Color.White, fontSize = 22.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
+            FootballTeam(match.home, match.homeId, match.homeCountry, Modifier.weight(1f, fill = false))
             Text(footballScore(match), Modifier.widthIn(min = 32.dp).clip(RoundedCornerShape(8.dp))
                 .background(accent.copy(alpha = if (live) .12f else if (match.homeScore != null) .06f else 0f)).padding(horizontal = 8.dp, vertical = 3.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = accent,
                 fontSize = if (match.homeScore == null || match.awayScore == null) 16.sp else 22.sp,
                 fontWeight = FontWeight.SemiBold, style = FootballTextStyle)
-            Text(match.away, Modifier.weight(1f, fill = false), color = Color.White, fontSize = 22.sp, lineHeight = 26.sp,
-                fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
+            FootballTeam(match.away, match.awayId, match.awayCountry, Modifier.weight(1f, fill = false))
         }
         Text(footballSchedule(match, locale), color = secondary.copy(alpha = .85f), fontSize = 12.sp,
             lineHeight = 16.sp, maxLines = 2, style = FootballTextStyle)
+    }
+}
+
+@Composable
+private fun FootballTeam(name: String, id: String, knownCountry: String, modifier: Modifier) {
+    val online = LocalInternet.current
+    val country by androidx.compose.runtime.produceState(knownCountry, id, knownCountry, online) {
+        value = knownCountry
+        if (knownCountry.isBlank() && online) value = FootballRepository.teamCountry(id)
+    }
+    val flag = remember(country) { footballCountryFlag(country) }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        // Reserve the tiny flag slot so a network result never shifts the team name.
+        Box(Modifier.width(with(androidx.compose.ui.platform.LocalDensity.current) { 20.sp.toDp() }), contentAlignment = Alignment.Center) {
+            if (flag != null) Text(flag, fontSize = 17.sp, maxLines = 1,
+                modifier = Modifier.semantics { contentDescription = country })
+        }
+        Text(name, color = Color.White, fontSize = 22.sp, lineHeight = 26.sp,
+            fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
     }
 }
 

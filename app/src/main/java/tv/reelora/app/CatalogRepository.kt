@@ -61,7 +61,7 @@ data class MediaDetails(
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 @Immutable data class WeatherNow(val temperature: Int, val code: Int, val isDay: Boolean = true)
-@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "", val competition: String = "", val priority: Int = 99)
+@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "", val competition: String = "", val priority: Int = 99, val homeId: String = "", val awayId: String = "", val homeCountry: String = "", val awayCountry: String = "")
 @Immutable data class FootballHint(val competition: String, val days: Int)
 @Immutable data class FootballSnapshot(val live: FootballMatch?, val next: FootballMatch?, val previous: FootballMatch?, val hint: FootballHint? = null)
 @Immutable
@@ -112,6 +112,19 @@ object WeatherRepository {
 
 object FootballRepository {
     private const val BASE = "https://www.thesportsdb.com/api/v1/json/123"
+    private val countries = boundedCache<String, String>(256)
+
+    suspend fun teamCountry(id: String): String {
+        if (id.isBlank() || !id.all(Char::isDigit)) return ""
+        countries[id]?.let { return it }
+        return kotlinx.coroutines.withTimeoutOrNull(2_000L) {
+            requestResult {
+                readJson("$BASE/lookupteam.php?id=$id").optJSONArray("teams")
+                    ?.optJSONObject(0)?.optString("strCountry").orEmpty().takeIf { it != "null" }.orEmpty()
+            }.getOrNull()?.also { countries[id] = it }
+        }.orEmpty()
+    }
+
     private val leagues = listOf("4429" to "WORLD CUP", "4480" to "CHAMPIONS LEAGUE", "4328" to "PREMIER LEAGUE")
 
     suspend fun load(): FootballSnapshot? = withContext(Dispatchers.Default) {
@@ -157,6 +170,8 @@ private fun JSONObject.footballMatch(competition: String, priority: Int) = Footb
     status = optString("strProgress").ifBlank { optString("strStatus") },
     competition = competition,
     priority = priority,
+    homeId = optString("idHomeTeam"),
+    awayId = optString("idAwayTeam"),
 )
 
 private fun footballDateRank(date: String) = runCatching { LocalDate.parse(date).toEpochDay() }.getOrDefault(Long.MAX_VALUE)

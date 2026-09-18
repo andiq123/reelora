@@ -130,3 +130,5 @@ The aligned layout was visually checked on the Mi Box at 720p with normal and 1.
 The latest refinement removes stretched columns and excess spacing: compact match groups, warm neutral text, restrained status colors, and mint only for live scores. A subtle wallpaper scrim keeps dates readable without a widget panel.
 
 Build `./gradlew assembleDebug`, install the debug APK on a local Android TV emulator, then run `python3 scripts/preview-widgets.py emulator-5554`. The debug-only activity renders the actual production widgets with repeatable fixtures; it and its sample wallpaper are excluded from release APKs. The dock in these previews is illustrative. See [the design review](docs/widget-design-review.md) for iterations and checked states.
+
+Football team flags use Android’s bundled emoji artwork and country metadata fetched only for displayed teams. Lookups have a two-second timeout and a bounded in-memory cache; match content never waits for flags. Unknown countries remain unmarked.

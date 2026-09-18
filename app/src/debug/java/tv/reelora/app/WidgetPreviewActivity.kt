@@ -22,12 +22,12 @@ class WidgetPreviewActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val scenario = intent.getStringExtra("scenario") ?: "ready"
-        val next = FootballMatch("Brentford", "Chelsea", "2026-09-18", "20:00", null, null, competition = "PREMIER LEAGUE")
-        val previous = FootballMatch("Leeds United", "Newcastle United", "2026-09-14", "20:00", 4, 1, competition = "PREMIER LEAGUE")
+        val next = FootballMatch("Brentford", "Chelsea", "2026-09-18", "20:00", null, null, competition = "PREMIER LEAGUE", homeCountry = "England", awayCountry = "England")
+        val previous = FootballMatch("Leeds United", "Newcastle United", "2026-09-14", "20:00", 4, 1, competition = "PREMIER LEAGUE", homeCountry = "England", awayCountry = "England")
         val snapshot = when (scenario) {
             "loading", "offline" -> null
-            "long" -> FootballSnapshot(null, next.copy(home = "Borussia Mönchengladbach", away = "Wolverhampton Wanderers"), previous)
-            "live" -> FootballSnapshot(next.copy(home = "Barcelona", away = "Real Madrid", homeScore = 2, awayScore = 1, status = "67′", competition = "CHAMPIONS LEAGUE"), next, previous)
+            "long" -> FootballSnapshot(null, next.copy(home = "Borussia Mönchengladbach", away = "Wolverhampton Wanderers", homeCountry = "Germany"), previous)
+            "live" -> FootballSnapshot(next.copy(home = "Barcelona", away = "Real Madrid", homeScore = 2, awayScore = 1, status = "67′", competition = "CHAMPIONS LEAGUE", homeCountry = "Spain", awayCountry = "Spain"), next, previous)
             else -> FootballSnapshot(null, next, previous, FootballHint("CHAMPIONS LEAGUE", 3))
         }
         val state = when (scenario) { "offline", "stale" -> WeatherLoadState.Error; "loading" -> WeatherLoadState.Loading; else -> WeatherLoadState.Ready }
