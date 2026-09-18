@@ -9,6 +9,15 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 class CatalogRepositoryTest {
+    @Test fun featuredSelectionAvoidsPreviousTitleAndHandlesSmallCatalogs() {
+        val first = MediaItem(1, "First", "", "2026", 7.0, 10, "movie", null, null)
+        val second = first.copy(id = 2, title = "Second")
+        assertEquals(second, nextDiscoveryItem(listOf(first, second), listOf(mediaKey(first))))
+        assertEquals(first, nextDiscoveryItem(listOf(first, second), listOf(mediaKey(first), mediaKey(second))))
+        assertEquals(first, nextDiscoveryItem(listOf(first), listOf(mediaKey(first))))
+        assertNull(nextDiscoveryItem(emptyList(), emptyList()))
+    }
+
     @Test
     fun unreleasedTitlesWithoutVotesAreNotZeroRated() {
         val movie = MediaItem(1, "Future movie", "", "2026", 0.0, 0, "movie", null, null)

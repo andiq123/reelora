@@ -532,6 +532,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         loading = result == null,
                         active = isForeground && !searching && !settingsOpen && selected == null && !weatherLocationOpen && !hiddenAppsOpen && configuredApp == null && editingApp == null,
                         apps = visibleApps,
+                        appsReady = appsReady,
                         weather = weather,
                         weatherState = weatherState,
                         use24HourClock = use24HourClock,
@@ -551,6 +552,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                 } else {
                     AppsOnlyHome(
                         apps = visibleApps,
+                        appsReady = appsReady,
                         weather = weather,
                         weatherState = weatherState,
                         use24HourClock = use24HourClock,
@@ -1082,6 +1084,7 @@ private fun Home(
     loading: Boolean,
     active: Boolean,
     apps: List<LauncherApp>,
+    appsReady: Boolean,
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
@@ -1122,17 +1125,17 @@ private fun Home(
         }
     }
     fun focusApps() {
+        if (!appsReady) return
         navigationJob?.cancel()
         navigationJob = scope.launch {
-            listState.scrollToItem(0)
+            listState.animateScrollToItem(0)
             val target = dockEntryIndex(appKeys, lastAppKey)
-            if (appListState.layoutInfo.visibleItemsInfo.none { it.index == target }) appListState.scrollToItem(target)
+            if (appListState.layoutInfo.visibleItemsInfo.none { it.index == target }) appListState.animateScrollToItem(target)
             withFrameNanos { }
             appFocus.requestFocus()
         }
     }
     BackHandler(enabled = active && movingAppKey == null) { focusApps() }
-    val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
@@ -1143,23 +1146,36 @@ private fun Home(
             }
         }
     }
-    val featured = sections.firstOrNull()
-    var hero by remember(featured) { mutableStateOf(featured?.items?.firstOrNull()) }
-    var recent by remember(featured) { mutableStateOf(hero?.let { listOf(mediaKey(it)) }.orEmpty()) }
+    val context = LocalContext.current
+    val heroPreferences = remember(context) { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
+    val featured = remember(sections) { sections.take(2).flatMap { it.items }.distinctBy(::mediaKey) }
+    var hero by remember { mutableStateOf<MediaItem?>(null) }
+    var recent by remember { mutableStateOf(listOfNotNull(heroPreferences.getString("lastFeatured", null))) }
+    LaunchedEffect(featured) {
+        if (featured.none { mediaKey(it) == hero?.let(::mediaKey) }) {
+            hero = nextDiscoveryItem(featured, recent)
+        }
+    }
+    LaunchedEffect(hero) {
+        hero?.let {
+            recent = (recent + mediaKey(it)).takeLast(10)
+            heroPreferences.edit().putString("lastFeatured", mediaKey(it)).apply()
+        }
+    }
     var initiallyFocused by remember { mutableStateOf(false) }
-    LaunchedEffect(installedAppKeys) {
-        if (initiallyFocused) return@LaunchedEffect
+    LaunchedEffect(appsReady) {
+        if (!appsReady || initiallyFocused) return@LaunchedEffect
+        appListState.scrollToItem(0)
         withFrameNanos { }
         appFocus.requestFocus()
-        initiallyFocused = apps.isNotEmpty()
+        initiallyFocused = true
     }
     val stageVisible by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
     LaunchedEffect(hero, featured, active, stageVisible) {
         if (!active || !stageVisible) return@LaunchedEffect
         delay(20_000)
-        nextDiscoveryItem(featured?.items.orEmpty(), recent)?.let {
+        nextDiscoveryItem(featured, recent)?.let {
             hero = it
-            recent = (recent + mediaKey(it)).takeLast(10)
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides stableBringIntoView) {
@@ -1197,7 +1213,7 @@ private fun Home(
             ) {
                 Column(Modifier.align(Alignment.BottomStart).padding(bottom = 24.dp)) {
                     AppDock(
-                        apps, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
+                        apps, appsReady, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
                         FocusRequester.Default,
                         focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onHiddenApps, onSettings,
                         onRowFocused = { lastAppKey = it },
@@ -1241,6 +1257,7 @@ private fun Home(
 @Composable
 private fun AppsOnlyHome(
     apps: List<LauncherApp>,
+    appsReady: Boolean,
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
@@ -1262,17 +1279,17 @@ private fun AppsOnlyHome(
     val appFocus = remember { FocusRequester() }
     var football by remember { mutableStateOf<FootballSnapshot?>(null) }
     var footballState by remember { mutableStateOf(WeatherLoadState.Loading) }
-    val installedAppKeys = remember(apps) { apps.map(::launcherAppKey).toSet() }
     val wallpaper = remember(wallpaperSeed) {
         "https://picsum.photos/seed/reelora-${LocalDate.now().toEpochDay() + wallpaperSeed}/1920/1080"
     }
     var initiallyFocused by remember { mutableStateOf(false) }
     BackHandler(enabled = movingAppKey == null) { }
-    LaunchedEffect(installedAppKeys) {
-        if (initiallyFocused) return@LaunchedEffect
+    LaunchedEffect(appsReady) {
+        if (!appsReady || initiallyFocused) return@LaunchedEffect
+        appListState.scrollToItem(0)
         withFrameNanos { }
         appFocus.requestFocus()
-        initiallyFocused = apps.isNotEmpty()
+        initiallyFocused = true
     }
     val isForeground = LocalForeground.current
     var footballRefreshAt by remember { mutableStateOf(0L) }
@@ -1327,6 +1344,7 @@ private fun AppsOnlyHome(
             onHiddenApps = onHiddenApps,
             onSettings = onSettings,
             onSearch = onSearch,
+            appsReady = appsReady,
             onRowFocused = {},
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
         )
@@ -1433,6 +1451,7 @@ internal fun footballHintText(hint: FootballHint?, romanian: Boolean): String {
 @OptIn(ExperimentalFoundationApi::class)
 private fun AppDock(
     apps: List<LauncherApp>,
+    appsReady: Boolean,
     listState: LazyListState,
     upFocus: FocusRequester,
     firstFocus: FocusRequester,
@@ -1455,11 +1474,13 @@ private fun AppDock(
 ) {
     val appKeys = remember(apps) { apps.map(::launcherAppKey) }
     val entry = dockEntryIndex(appKeys, entryKey)
+    val reveal = remember { Animatable(0f) }
+    LaunchedEffect(appsReady) { if (appsReady) reveal.animateTo(1f, tween(160)) }
     val scope = rememberCoroutineScope()
     var moveJob by remember { mutableStateOf<Job?>(null) }
     val returnFocus = remember { FocusRequester() }
-    LaunchedEffect(dockFocusKey) {
-        if (dockFocusKey == null) return@LaunchedEffect
+    LaunchedEffect(dockFocusKey, appsReady) {
+        if (!appsReady || dockFocusKey == null) return@LaunchedEffect
         val index = apps.indexOfFirst { launcherAppKey(it) == dockFocusKey }
             .takeIf { it >= 0 } ?: if (dockFocusKey == "hidden") apps.size + 1 else return@LaunchedEffect
         if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) listState.scrollToItem(index)
@@ -1472,12 +1493,20 @@ private fun AppDock(
             .clip(RoundedCornerShape(24.dp))
             .background(Color(0xD4141820)),
     ) {
+        if (!appsReady) {
+            Row(Modifier.padding(horizontal = 22.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                repeat(5) {
+                    Box(Modifier.size(116.dp, 68.dp).background(Color.White.copy(alpha = .05f), RoundedCornerShape(14.dp)))
+                }
+            }
+            return@Box
+        }
         CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
         LazyRow(
             state = listState,
             contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxSize().focusGroup().onPreviewKeyEvent { event ->
+            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }.focusGroup().onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown && onDown != null && movingAppKey == null) {
                     onDown()
                     true

@@ -102,3 +102,11 @@ Run `python3 scripts/check-tv-navigation.py SERIAL` with `adb` on PATH and movie
 Settings → System → **Device settings** opens the TV's own network, display, sound, and system controls. Native settings, Default home, and App info open outside Reelora's Home task, so a Home-task redirect cannot clear their screens. Back preserves Reelora's settings position. Unsupported vendor pages fall back to the main device settings, with a message if neither is available.
 
 Run `python3 scripts/check-device-settings.py SERIAL` with `adb` on PATH to check native settings task isolation, navigation, and return on a TV using the English interface.
+
+## Calm startup and varied features in 0.24.4
+
+The dock reserves its space during the first app scan, then fades in at the left edge with the first app focused. Search and other trailing actions no longer anchor the row before apps arrive. This applies to both Home modes, including an empty or fully hidden app list. Later app changes and returns from streaming apps preserve your position.
+
+Featured titles draw from current cinema and trending rows. Startup avoids the last featured title when alternatives exist; catalog refreshes retain the current selection while it remains available. Rotation stays paused in the background and behind dialogs. Returning to the dock uses cancellable native smooth scrolling.
+
+Run `python3 scripts/check-cold-start.py SERIAL` with `adb` on PATH and at least one visible app to check three fresh process starts without clearing settings. This does not simulate a full device reboot.
