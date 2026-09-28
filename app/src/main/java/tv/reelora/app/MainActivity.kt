@@ -1069,8 +1069,11 @@ private fun Home(
     }
     val context = LocalContext.current
     val heroPreferences = remember(context) { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
-    val featured = remember(sections) { sections.firstOrNull { it.title == "Discover movies" }?.items
-        ?: sections.take(2).flatMap { it.items }.distinctBy(::mediaKey) }
+    val featured = remember(sections) {
+        val pool = sections.firstOrNull { it.title == "Discover movies" }?.items
+            ?: sections.take(2).flatMap { it.items }.distinctBy(::mediaKey)
+        pool.filter { !it.backdropUrl.isNullOrBlank() }
+    }
     var hero by remember { mutableStateOf<MediaItem?>(null) }
     var recent by remember { mutableStateOf(listOfNotNull(heroPreferences.getString("lastFeatured", null))) }
     LaunchedEffect(featured) {

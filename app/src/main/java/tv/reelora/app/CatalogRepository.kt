@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -191,11 +193,12 @@ object CatalogRepository {
     private val mediaDetails = boundedCache<String, MediaDetails>(48)
     @Volatile private var cachedCatalog: Pair<LocalDate, CatalogResult>? = null
     @Volatile private var cachedAt = 0L
+    private val catalogRequests = Semaphore(4)
     val pageTitles = listOf("Discover", "In cinemas", "Movies", "TV series", "Animation")
     val configured get() = BuildConfig.TMDB_TOKEN.isNotBlank()
 
     val specs = listOf(
-        CatalogSpec(0, "Trending this week", "/trending/all/week", "movie"),
+        CatalogSpec(0, "Trending this week", "/trending/movie/week", "movie"),
         CatalogSpec(1, "Now in cinemas", "/movie/now_playing", "movie"),
         CatalogSpec(1, "Coming soon", "/movie/upcoming", "movie"),
         CatalogSpec(2, "Popular movies", "/movie/popular", "movie"),
@@ -225,7 +228,7 @@ object CatalogRepository {
             }
             CatalogResult(
                 specs.mapNotNull { spec -> sections.firstOrNull { it.title == spec.title }
-                    ?: cachedCatalog?.second?.sections?.firstOrNull { it.title == spec.title }?.let { it.copy(items = filterSectionItems(it.title, it.items, today)) } },
+                    ?: cachedCatalog?.second?.sections?.firstOrNull { it.title == spec.title }?.let { it.copy(items = curatedSectionItems(it.title, it.items, today)) } },
                 sections.size < specs.size,
             )
         }.getOrElse { fallback() }.also { if (!it.isDemo) { cachedCatalog = today to it; cachedAt = System.nanoTime() } }
@@ -334,12 +337,12 @@ object CatalogRepository {
         val paths = catalogPaths(spec, today)
         val items = coroutineScope {
             paths.map { path -> async {
-                parseItems(getJson(path, token).getJSONArray("results"), spec.mediaType, Int.MAX_VALUE)
+                catalogRequests.withPermit {
+                    parseItems(getJson(path, token).getJSONArray("results"), spec.mediaType, Int.MAX_VALUE)
+                }
             } }.awaitAll().flatten()
         }
-        val filtered = filterSectionItems(spec.title, items, today)
-        return CatalogSection(spec.page, spec.title,
-            if (spec.title == "Coming soon") curatedComingSoon(filtered) else filtered.take(20))
+        return CatalogSection(spec.page, spec.title, curatedSectionItems(spec.title, items, today))
     }
 
     private fun parseItems(results: JSONArray, defaultType: String, limit: Int = 18) = buildList<MediaItem> {
@@ -457,7 +460,7 @@ internal fun catalogPath(spec: CatalogSpec, today: LocalDate): String = if (spec
 
 internal fun catalogPaths(spec: CatalogSpec, today: LocalDate): List<String> {
     val path = catalogPath(spec, today)
-    return if (spec.title == "Coming soon") (1..3).map { "$path&page=$it" } else listOf(path)
+    return (1..3).map { "$path${if ('?' in path) '&' else '?'}page=$it" }
 }
 
 // Rank first, then arrange the shortlist chronologically. Upcoming films need no votes yet.
