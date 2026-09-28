@@ -39,3 +39,11 @@ A cold hero image can still arrive after the text entrance animation. Keeping ol
 - No physical device update, Git commit, or push performed during this audit. Screenshots and raw local logs are in `work/flow-audit/`.
 
 Motion follow-up: dialog entrances use the same 140 ms / 6 dp treatment. App insertion and hidden-app rows use 100 ms in, 140 ms placement, and 80 ms out. These transitions do not add app-launch or navigation waits. A local cold-start recording was inspected (`work/motion-audit/intro.mp4`); recording/emulator timing is not a target-TV frame-rate benchmark.
+
+## Home row navigation (0.24.10)
+
+Home owns vertical D-pad movement: hero → dock → movie categories. A mounted focus target holds focus while a lazy destination is being laid out; rapid vertical input updates the logical destination and cancels only the obsolete transfer. Horizontal and confirm input cannot act on an old card during that transfer. Row endpoints consume vertical input instead of falling back to spatial focus search.
+
+Movie navigation follows the focused card’s horizontal screen position and selects the nearest fully visible card in the destination row. Each row retains its independent horizontal scroll; a far-right catalog index is never copied to another row. Partially clipped cards are avoided when a fully visible target exists. Returning to the dock preserves the app identity and visible horizontal position. Row scrolling is immediate before focus handoff, with existing focus animations retained; there is no overlapping animated vertical scroll job.
+
+Regression coverage in `scripts/check-tv-navigation.py` includes far-right dock/hero round trips, all movie categories, shorter rows, bottom/right boundaries and bursts of opposite directions. The script requires loaded movie categories and English labels on the selected test device.

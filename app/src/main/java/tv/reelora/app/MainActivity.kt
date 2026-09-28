@@ -71,6 +71,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -1032,31 +1033,58 @@ private fun Home(
     val movieRowState = remember(sections) { sections.map { LazyListState() } }
     val appKeys = remember(apps) { apps.map(::launcherAppKey) }
     var lastAppKey by remember { mutableStateOf<String?>(null) }
-    var lastFirstMovieIndex by remember { mutableStateOf(0) }
+    // Keep a focus target mounted while lazy rows dispose and compose their children.
+    val navigationFocus = remember { FocusRequester() }
+    var focusedRow by remember { mutableStateOf(-1) } // Hero -2, dock -1, then movie rows.
+    var movieIndex by remember { mutableStateOf(0) }
+    var movieAnchor by remember { mutableStateOf(0) }
     var navigationJob by remember { mutableStateOf<Job?>(null) }
-    fun focusMovie(row: Int, item: Int) {
-        if (row !in movieRowFocus.indices) return
-        val target = adjacentRowIndex(item, movieRowFocus[row].size)
+    var navigating by remember { mutableStateOf(false) }
+    fun navigateTo(row: Int) {
+        if (!appsReady || row < -2 || row >= sections.size) return
+        if (!navigating && focusedRow in movieRowState.indices) {
+            movieRowState[focusedRow].layoutInfo.visibleItemsInfo.firstOrNull { it.index == movieIndex }?.let {
+                movieAnchor = it.offset + it.size / 2
+            }
+        }
         navigationJob?.cancel()
+        navigating = true
+        focusedRow = row
+        navigationFocus.requestFocus()
         navigationJob = scope.launch {
-            listState.scrollToItem(row + 1)
-            movieRowState[row].scrollToItem((target - 2).coerceAtLeast(0))
+            if (row < 0) {
+                listState.scrollToItem(0)
+                if (row == -1) {
+                    val target = dockEntryIndex(appKeys, lastAppKey)
+                    if (appListState.layoutInfo.visibleItemsInfo.none { it.index == target }) {
+                        appListState.scrollToItem(target)
+                    }
+                }
+            } else {
+                // Preserve this row's horizontal viewport; vertical movement must never scroll it sideways.
+                listState.scrollToItem(row + 1)
+            }
+            // A layout frame attaches the destination requester before focus is handed over.
             withFrameNanos { }
-            movieRowFocus[row][target].requestFocus()
+            when {
+                row == -2 -> heroFocus.requestFocus()
+                row == -1 -> appFocus.requestFocus()
+                else -> {
+                    val layout = movieRowState[row].layoutInfo
+                    val target = nearestVisibleMovie(
+                        movieAnchor,
+                        layout.viewportStartOffset + 24,
+                        layout.viewportEndOffset - 24,
+                        layout.visibleItemsInfo.map { VisibleMovie(it.index, it.offset, it.size) },
+                    ) ?: run { navigating = false; return@launch }
+                    movieIndex = target
+                    movieRowFocus[row][target].requestFocus()
+                }
+            }
+            navigating = false
         }
     }
-    fun focusApps() {
-        if (!appsReady) return
-        navigationJob?.cancel()
-        navigationJob = scope.launch {
-            listState.scrollToItem(0)
-            val target = dockEntryIndex(appKeys, lastAppKey)
-            if (appListState.layoutInfo.visibleItemsInfo.none { it.index == target }) appListState.animateScrollToItem(target)
-            withFrameNanos { }
-            appFocus.requestFocus()
-        }
-    }
-    BackHandler(enabled = active && movingAppKey == null) { focusApps() }
+    BackHandler(enabled = active && movingAppKey == null) { navigateTo(-1) }
     val stableBringIntoView = remember {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
@@ -1110,11 +1138,23 @@ private fun Home(
             modifier = Modifier.fillMaxSize().onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
+                    Key.DirectionUp, Key.DirectionDown -> {
+                        if (movingAppKey != null) false
+                        else {
+                            val firstRow = if (hero == null) -1 else -2
+                            val next = (focusedRow + if (event.key == Key.DirectionDown) 1 else -1)
+                                .coerceIn(firstRow, sections.lastIndex.coerceAtLeast(-1))
+                            if (next != focusedRow) navigateTo(next)
+                            true
+                        }
+                    }
+                    Key.DirectionLeft, Key.DirectionRight -> navigating || focusedRow == -2
+                    Key.DirectionCenter, Key.Enter -> navigating
                     Key.Menu -> { onSettings(); true }
                     Key.Search -> { onSearch(); true }
                     else -> false
                 }
-            },
+            }.focusRequester(navigationFocus).focusProperties { canFocus = navigating }.focusable(),
         ) {
             item(key = "stage", contentType = "stage") { LauncherStage(
                 hero,
@@ -1126,11 +1166,8 @@ private fun Home(
                     if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = SecondaryText, fontSize = 13.sp)
                     hero?.let { shown -> ActionButton(
                         "Explore",
-                        Modifier.focusRequester(heroFocus).onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                                focusApps()
-                                true
-                            } else false
+                        Modifier.focusRequester(heroFocus).onFocusChanged {
+                            if (it.isFocused && !navigating) focusedRow = -2
                         },
                         icon = Icons.Default.Info,
                     ) { onSelect(shown) } }
@@ -1141,10 +1178,14 @@ private fun Home(
                         apps, appsReady, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
                         FocusRequester.Default,
                         focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onHiddenApps, onSettings,
-                        onRowFocused = { if (navigationJob?.isActive != true) lastAppKey = it },
+                        onRowFocused = {
+                            if (!navigating) {
+                                lastAppKey = it
+                                focusedRow = -1
+                            }
+                        },
                         entryKey = lastAppKey,
                         onSearch = onSearch,
-                        onDown = if (sections.isNotEmpty()) ({ focusMovie(0, lastFirstMovieIndex) }) else null,
                     )
                 }
             } }
@@ -1156,13 +1197,11 @@ private fun Home(
                     movieRowState[index],
                     movieRowFocus[index],
                     focusLift,
-                    onUp = { itemIndex ->
-                        if (index == 0) focusApps()
-                        else focusMovie(index - 1, itemIndex)
-                    },
-                    onDown = if (index < sections.lastIndex) ({ itemIndex -> focusMovie(index + 1, itemIndex) }) else null,
                     onItemFocused = { itemIndex ->
-                        if (index == 0) lastFirstMovieIndex = itemIndex
+                        if (!navigating) {
+                            focusedRow = index
+                            movieIndex = itemIndex
+                        }
                     },
                 )
             }
@@ -1551,12 +1590,11 @@ private fun ShelfActionCard(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    LaunchedEffect(focused) { if (focused) onFocused() }
     val width = 116.dp
     val height = 68.dp
     Card(
         onClick = onClick,
-        modifier = modifier.width(width).zIndex(if (focused) 1f else 0f),
+        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() }.width(width).zIndex(if (focused) 1f else 0f),
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
         scale = CardDefaults.scale(focusedScale = if (focusLift) 1.065f else 1f, pressedScale = .99f),
         border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
@@ -1599,14 +1637,13 @@ private fun AppCard(
     val movePress = remember(moving) { RemotePressGate() }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    LaunchedEffect(focused) { if (focused) onFocused() }
     val tileWidth = 116.dp
     val tileHeight = 68.dp
     val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
     Card(
         onClick = { if (moving) onMoveDone() else onLaunch(app) },
         onLongClick = { if (!moving) onConfigure(app) },
-        modifier = modifier.width(tileWidth)
+        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() }.width(tileWidth)
             .zIndex(if (focused || moving) 1f else 0f)
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
@@ -2390,8 +2427,6 @@ private fun MediaRow(
     listState: LazyListState,
     itemFocus: List<FocusRequester>,
     focusLift: Boolean,
-    onUp: (Int) -> Unit,
-    onDown: ((Int) -> Unit)?,
     onItemFocused: (Int) -> Unit,
 ) {
     Column {
@@ -2411,8 +2446,6 @@ private fun MediaRow(
                         when (event.key) {
                             Key.DirectionLeft -> index == 0
                             Key.DirectionRight -> index == section.items.lastIndex
-                            Key.DirectionUp -> { onUp(index); true }
-                            Key.DirectionDown -> onDown?.let { it(index); true } ?: false
                             else -> false
                         }
                     }.onFocusChanged {
