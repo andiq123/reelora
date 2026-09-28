@@ -54,7 +54,7 @@ for offset in (0, 3):  # Last action, then last installed app.
 press('DPAD_DOWN')
 press(*(['DPAD_RIGHT'] * 40))
 movie = focused()
-assert movie != dock and 'Explore' not in movie, 'Movie row was not reached'
+assert any(' · ' in label for label in movie), 'Movie row was not reached; focus stayed outside a media card'
 for _ in range(3):
     press('DPAD_UP', 'DPAD_UP')
     assert 'Explore' in focused(), 'Movie/dock Up did not reach the hero'

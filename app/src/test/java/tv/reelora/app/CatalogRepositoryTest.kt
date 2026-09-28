@@ -43,7 +43,29 @@ class CatalogRepositoryTest {
         val path = catalogPath(CatalogRepository.specs.single { it.title == "Coming soon" }, today)
         assertTrue(path.startsWith("/discover/movie?"))
         assertTrue(path.contains("primary_release_date.gte=2026-09-10"))
-        assertTrue(path.contains("primary_release_date.lte=2027-03-09"))
+        assertTrue(path.contains("primary_release_date.lte=2027-09-09"))
+    }
+
+    @Test fun categoryFiltersAndOrderingPreserveTheirMeaning() {
+        val today = LocalDate.of(2026, 9, 28)
+        fun movie(id: Int, date: String) = MediaItem(id, "Title", "", "2026", 7.0, 10, "movie", null, null, date)
+        val later = movie(1, "2026-11-01")
+        val sooner = movie(2, "2026-10-01")
+        val released = movie(3, "2026-09-20")
+        val farFuture = movie(4, "2028-01-01")
+        val series = released.copy(id = 5, mediaType = "tv")
+        val animation = released.copy(id = 6, genreIds = listOf(16))
+        val items = listOf(later, sooner, released, farFuture, series, animation, sooner)
+        assertEquals(listOf(sooner, later), filterSectionItems("Coming soon", items, today))
+        assertEquals(listOf(released, animation), filterSectionItems("Top rated movies", items, today))
+        assertEquals(listOf(series), filterSectionItems("Popular series", items, today))
+        assertEquals(listOf(animation), filterSectionItems("Popular animation", items, today))
+        assertTrue(catalogPath(CatalogRepository.specs.single { it.title == "Coming soon" }, today)
+            .contains("sort_by=popularity.desc"))
+        assertEquals("Horror", primaryGenre(released.copy(genreIds = listOf(27, 53))))
+        assertEquals("Sci-Fi & Fantasy", primaryGenre(series.copy(genreIds = listOf(10765))))
+        assertEquals("Comedy", primaryGenre(released.copy(genreIds = listOf(-1, 35))))
+        assertNull(primaryGenre(released))
     }
 
     @Test
@@ -82,7 +104,7 @@ class CatalogRepositoryTest {
     fun catalogRoutesCoverDistinctTvSections() {
         val specs = CatalogRepository.specs
         assertEquals(5, CatalogRepository.pageTitles.size)
-        assertEquals(6, specs.map { it.title }.distinct().size)
+        assertEquals(7, specs.map { it.title }.distinct().size)
         assertTrue(CatalogRepository.pageTitles.indices.all { page -> specs.any { it.page == page } })
         assertTrue(specs.single { it.title == "Popular animation" }.path.contains("with_genres=16"))
         assertTrue(specs.any { it.mediaType == "tv" })
@@ -152,11 +174,11 @@ class CatalogRepositoryTest {
     }
 
     @Test
-    fun launcherDiscoveryRowsAreDiverseAndNeverRepeatTitles() {
+    fun categoriesKeepTheirOwnTitlesAndDeduplicateWithinEachRow() {
         fun item(id: Int) = MediaItem(id, "Title $id", "", "2026", 8.0, 1, "movie", null, null)
         val catalog = CatalogResult(
             listOf(
-                CatalogSection(0, "Now in cinemas", listOf(item(1), item(2))),
+                CatalogSection(0, "Now in cinemas", listOf(item(1), item(2), item(1))),
                 CatalogSection(0, "Trending this week", listOf(item(1), item(3))),
                 CatalogSection(0, "Top rated movies", listOf(item(2), item(4))),
                 CatalogSection(0, "Popular series", listOf(item(5))),
@@ -166,10 +188,12 @@ class CatalogRepositoryTest {
             false,
         )
         val sections = launcherMovieSections(catalog)
-        val keys = sections.flatMap { it.items }.map(::mediaKey)
 
         assertEquals(6, sections.size)
-        assertEquals(keys.distinct(), keys)
+        assertEquals(listOf(1, 2), sections.first().items.map { it.id })
+        assertEquals(listOf(1, 3), sections.single { it.title == "Trending this week" }.items.map { it.id })
+        assertEquals(listOf(6), sections.single { it.title == "Popular animation" }.items.map { it.id })
+        assertEquals(listOf(6, 7), sections.single { it.title == "Coming soon" }.items.map { it.id })
     }
 
     @Test

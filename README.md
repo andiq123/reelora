@@ -61,7 +61,7 @@ Movie search is available directly on the app shelf in both home modes. Settings
 
 ## Discovery and navigation refinements in 0.21.0
 
-Coming soon now uses future primary release dates, with a second local date check. Catalog data refreshes at midnight or after six hours while Home is active. Unavailable APIs no longer produce invented movie titles, cast members, genres, or runtimes. Unrated titles show “Not rated”.
+Coming Soon selects up to 40 films with artwork and positive popularity from three popularity-ranked pages across the next year, then sorts this shortlist earliest first. It does not require ratings for unreleased films or fill gaps with obscure nearest-date results. Discover movies mixes popular, trending, and cinema releases, with one upcoming highlight after each four released movies. Artwork remains lazy-loaded; metadata uses the existing six-hour cache. Each category retains its own titles, deduplicated within the row. Cards show the first recognized genre from existing list metadata without extra requests. Catalog data refreshes at midnight or after six hours while Home is active. Unavailable APIs no longer produce invented movie titles, cast members, genres, or runtimes. Unrated titles show “Not rated”.
 
 Settings uses a category sidebar and a stable update footer. Hidden apps adapts to the TV viewport and restores focus after returning apps to Home. Search has Clear and Retry actions, distinguishes unavailable search from no results, and retains results when returning from movie details. Idle theater mode pauses while a dialog is open.
 
@@ -132,3 +132,9 @@ The latest refinement removes stretched columns and excess spacing: compact matc
 Build `./gradlew assembleDebug`, install the debug APK on a local Android TV emulator, then run `python3 scripts/preview-widgets.py emulator-5554`. The debug-only activity renders the actual production widgets with repeatable fixtures; it and its sample wallpaper are excluded from release APKs. The dock in these previews is illustrative. See [the design review](docs/widget-design-review.md) for iterations and checked states.
 
 Football team flags use Android’s bundled emoji artwork and country metadata fetched only for displayed teams. Lookups have a two-second timeout and a bounded in-memory cache; match content never waits for flags. Unknown countries remain unmarked.
+
+Settings sections follow directional focus and their content scrolls for larger text. Home keeps every movie category below the hero and uses one cancellable vertical navigation operation. See [the performance and interaction audit](docs/performance-flow-audit.md) for findings and measurement limits.
+
+The first app shelf reveal uses one 140 ms fade with a 6 dp upward slide. Already-loaded shelves appear immediately on return; app insertion/removal uses short bounded transitions. Dialog entrances share the same restrained motion, without staggered delays.
+
+Shared colors, focus surfaces, spacing, and corner radii live in `DesignTokens.kt`. See [the design-system review](docs/design-system-review.md) for the visual rationale and verification scope.

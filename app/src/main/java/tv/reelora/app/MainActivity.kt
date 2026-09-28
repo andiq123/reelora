@@ -38,12 +38,15 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -137,8 +140,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Border
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.Icon
@@ -160,97 +161,10 @@ import java.time.LocalTime
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-private val Background = Color(0xFF080A0F)
-private val Surface = Color(0xFF171A22)
-private val Violet = Color(0xFF8DA2FF)
-private val Coral = Color(0xFFFFB56B)
-private val PanelBrush = Brush.verticalGradient(listOf(Color(0xF2181C24), Color(0xF211141B)))
-private val DialogShape = RoundedCornerShape(28.dp)
-private val ControlShape = RoundedCornerShape(12.dp)
-private val Gap = 12.dp
-private val GapLarge = 24.dp
-private val DialogPadding = 28.dp
-internal val LocalRomanian = staticCompositionLocalOf { false }
 private val LocalDialogReady = staticCompositionLocalOf { false }
 internal val LocalInternet = staticCompositionLocalOf { false }
 private val LocalForeground = staticCompositionLocalOf { true }
 
-private val RomanianUi = mapOf(
-    "Loading discovery…" to "Se încarcă recomandările…", "Discovery unavailable · your apps are ready" to "Recomandări indisponibile · aplicațiile sunt gata",
-    "Not rated" to "Fără evaluare", "Retry" to "Reîncearcă", "All your apps are on Home" to "Toate aplicațiile sunt pe Acasă", "Clear" to "Șterge",
-    "Ambient trailers after a quiet moment" to "Trailere după o perioadă de inactivitate",
-    "Hold an app to move, rename or hide it" to "Ține apăsat pe o aplicație pentru a o muta, redenumi sau ascunde",
-    "Find your next movie" to "Găsește următorul film", "Search unavailable · try again" to "Căutare indisponibilă · încearcă din nou",
-    "Check your connection and search again" to "Verifică conexiunea și caută din nou", "Try a different title" to "Încearcă alt titlu",
-    "Search movies, series and animation" to "Caută filme, seriale și animație",
-    "Check for updates" to "Caută actualizări", "Checking…" to "Se verifică…",
-    "Downloading…" to "Se descarcă…", "Install update" to "Instalează",
-    "You're up to date" to "Ai ultima versiune", "Allow installation to continue" to "Permite instalarea pentru a continua",
-    "Update check failed · try again" to "Verificarea a eșuat · încearcă din nou",
-    "Update could not be verified · try again" to "Actualizarea nu poate fi instalată · verifică conexiunea și versiunea",
-    "Discover" to "Descoperă", "Explore" to "Explorează", "YOUR APPS" to "APLICAȚIILE TALE",
-    "Your apps, ready" to "Aplicațiile tale sunt gata",
-    "Football" to "Fotbal", "Upcoming" to "Urmează", "Finished" to "Încheiat", "Previous" to "Anterior", "Live" to "În direct",
-    "Settings" to "Setări", "Waiting for internet" to "Așteptăm conexiunea", "Updating weather" to "Actualizăm vremea", "Loading weather" to "Se încarcă vremea",
-    "Clear sky" to "Cer senin", "Clear night" to "Noapte senină", "Partly cloudy" to "Parțial noros", "Cloudy" to "Noros", "Fog" to "Ceață", "Rain" to "Ploaie", "Snow" to "Ninsoare", "Thunderstorm" to "Furtună", "Weather unavailable" to "Vreme indisponibilă", "A quiet home for apps and discovery" to "Un spațiu calm pentru aplicații și descoperire",
-    "APP SHELF" to "APLICAȚII", "Find and manage Home apps" to "Găsește și organizează aplicațiile",
-    "HOME" to "ACASĂ", "Featured movies or a calm wallpaper" to "Filme recomandate sau un fundal calm",
-    "WEATHER & TIME" to "VREME ȘI ORĂ", "Location, temperature and clock" to "Locație, temperatură și ceas",
-    "SYSTEM" to "SISTEM", "Home and Android controls" to "Comenzi pentru ecranul principal și Android",
-    "Done" to "Gata", "Search" to "Căutare", "Hidden" to "Ascunse", "Labels on" to "Etichete pornite",
-    "Labels off" to "Etichete oprite", "Lifted focus" to "Focus ridicat", "Outline focus" to "Contur focus",
-    "Movies on" to "Filme pornite", "Apps only" to "Doar aplicații", "New wallpaper" to "Fundal nou",
-    "Football on" to "Fotbal pornit", "Football off" to "Fotbal oprit", "Theater on" to "Cinema pornit",
-    "Theater off" to "Cinema oprit", "Daily wallpaper · Picsum" to "Fundal zilnic · Picsum",
-    "Default home" to "Launcher implicit", "Device settings" to "Setările dispozitivului", "Network, display, sound and Android system" to "Rețea, imagine, sunet și sistem Android", "English" to "English", "Română" to "Română",
-    "App options" to "Opțiuni aplicație", "Move" to "Mută", "Reorder on Home" to "Reordonează pe Acasă",
-    "Rename" to "Redenumește", "Shelf label" to "Nume pe raft", "App info" to "Informații",
-    "Manage or uninstall" to "Gestionează aplicația", "Hide" to "Ascunde", "Remove from Home" to "Elimină de pe Acasă",
-    "Close" to "Închide", "Rename app" to "Redenumește aplicația", "Change the name shown on Home" to "Schimbă numele afișat pe Acasă",
-    "App name" to "Numele aplicației", "Reset" to "Resetează", "Cancel" to "Anulează", "Save" to "Salvează",
-    "Hidden apps" to "Aplicații ascunse", "Open an app or return it to Home" to "Deschide sau readaugă o aplicație pe Acasă",
-    "Hidden from Home" to "Ascunsă de pe Acasă", "Open" to "Deschide", "Show on Home" to "Arată pe Acasă",
-    "Restore anytime from Hidden apps" to "Restabilește oricând din Aplicații ascunse",
-    "No hidden apps" to "Nu există aplicații ascunse", "Weather location" to "Locația meteo",
-    "Search, choose, then confirm" to "Caută, alege, apoi confirmă", "City" to "Oraș", "Searching…" to "Se caută…",
-    "Choose the correct location" to "Alege locația corectă", "No locations found" to "Nu s-au găsit locații",
-    "Type at least two letters" to "Scrie cel puțin două litere", "Use location" to "Folosește locația",
-    "Search, choose, then confirm" to "Caută, alege, apoi confirmă", "Movies, series and animation" to "Filme, seriale și animație",
-    "Type a title…" to "Scrie un titlu…", "Voice" to "Voce", "Popular now" to "Populare acum",
-    "Finding suggestions…" to "Se caută sugestii…", "No matches" to "Niciun rezultat", "Suggestions" to "Sugestii",
-    "View" to "Vezi", "Back" to "Înapoi", "Play trailer" to "Redă trailerul", "Cast" to "Distribuție",
-    "More like this" to "Titluri similare", "No other titles found" to "Nu s-au găsit alte titluri",
-    "Cast information unavailable" to "Informațiile despre distribuție nu sunt disponibile",
-    "TOP FOOTBALL" to "FOTBAL IMPORTANT", "LIVE" to "LIVE", "NEXT" to "URMĂTORUL", "LAST" to "ULTIMUL",
-    "Loading fixtures…" to "Se încarcă meciurile…", "Fixtures unavailable · retrying" to "Meciurile nu sunt disponibile · reîncercăm",
-    "No fixture" to "Niciun meci", "STREAMING" to "STREAMING", "RENT / BUY" to "ÎNCHIRIAZĂ / CUMPĂRĂ",
-    "NO STREAMING LISTED" to "FĂRĂ STREAMING LISTAT", "Coming soon" to "În curând", "Now in cinemas" to "Acum în cinematografe",
-    "Trending this week" to "În tendințe săptămâna aceasta", "Top rated movies" to "Filme apreciate",
-    "Popular series" to "Seriale populare", "Popular animation" to "Animații populare",
-    "Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo" to "Filme prin TMDB · Disponibilitate prin JustWatch · Vreme prin Open-Meteo",
-)
-
-internal fun localizeUi(text: String, romanian: Boolean): String {
-    if (!romanian) return text
-    RomanianUi[text]?.let { return it }
-    return when {
-        text.contains("Weather") -> text.replace("Weather", "Vreme")
-        text.startsWith("Hidden · ") -> text.replaceFirst("Hidden", "Ascunse")
-        text.startsWith("After ") -> text.replaceFirst("After ", "După ").replace(" min", " min")
-        text.startsWith("Selected · ") -> text.replaceFirst("Selected", "Selectat")
-        text.startsWith("Availability by JustWatch") -> text.replaceFirst("Availability by", "Disponibilitate prin")
-        text.contains(" · Movies & TV") -> text.replace(" · Movies & TV", " · Filme și TV").replace(" · Updating…", " · Se actualizează…")
-        text.startsWith("LIVE · ") -> text.split(" · ").joinToString(" · ") { RomanianUi[it] ?: it }
-        text.startsWith("NEXT · ") -> text.replaceFirst("NEXT", "URMĂTORUL").split(" · ").joinToString(" · ") { RomanianUi[it] ?: it }
-        text.startsWith("LAST · ") -> text.replaceFirst("LAST", "ULTIMUL").split(" · ").joinToString(" · ") { RomanianUi[it] ?: it }
-        text.contains("COMING") -> text.replace("COMING", "ÎN CURÂND")
-        text.contains("RELEASES TODAY") -> text.replace("RELEASES TODAY", "APARE AZI")
-        text.contains("RELEASED") -> text.replace("RELEASED", "LANSAT")
-        else -> text
-    }
-}
-
-@Composable private fun tr(text: String) = localizeUi(text, LocalRomanian.current)
 private val RowBringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val margin = 24f
@@ -357,8 +271,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
     val updateStatus by updater.status.collectAsState()
     CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground, LocalInternet provides online) { MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Violet,
-            secondary = Coral,
+            primary = Accent,
+            secondary = WarmAccent,
             background = Background,
             surface = Surface,
             onBackground = Color.White,
@@ -469,7 +383,6 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         LaunchedEffect(isForeground, online, moviesEnabled, searching, appsReady) {
             if (!isForeground || !online || !appsReady || (!moviesEnabled && !searching)) return@LaunchedEffect
             withFrameNanos { }
-            delay(750)
             var retryDelay = 10_000L
             while (true) {
                 val loaded = CatalogRepository.load()
@@ -787,6 +700,7 @@ internal fun nextTheaterIdleMinutes(current: Int) =
 
 internal fun launcherMovieSections(catalog: CatalogResult): List<CatalogSection> {
     val preferred = listOf(
+        "Popular movies",
         "Now in cinemas",
         "Trending this week",
         "Top rated movies",
@@ -796,10 +710,9 @@ internal fun launcherMovieSections(catalog: CatalogResult): List<CatalogSection>
     )
         .mapNotNull { title -> catalog.sections.firstOrNull { it.title == title && it.items.isNotEmpty() } }
         .ifEmpty { catalog.sections.filter { it.items.isNotEmpty() }.take(6) }
-    val seen = mutableSetOf<String>()
-    return preferred.mapNotNull { section ->
-        section.copy(items = section.items.filter { seen.add(mediaKey(it)) }).takeIf { it.items.isNotEmpty() }
-    }
+    val discovery = discoveryMovies(catalog)
+    return listOfNotNull(discovery.takeIf { it.isNotEmpty() }?.let { CatalogSection(0, "Discover movies", it) }) +
+        preferred.map { section -> section.copy(items = section.items.distinctBy(::mediaKey)) }
 }
 
 @Suppress("DEPRECATION")
@@ -1030,13 +943,13 @@ private fun AmbientBackdrop() {
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier.size(560.dp).align(Alignment.TopEnd).background(
-                Brush.radialGradient(listOf(Violet.copy(alpha = .17f), Color.Transparent)),
+                Brush.radialGradient(listOf(Accent.copy(alpha = .17f), Color.Transparent)),
                 CircleShape,
             ),
         )
         Box(
             Modifier.size(460.dp).align(Alignment.BottomStart).background(
-                Brush.radialGradient(listOf(Coral.copy(alpha = .10f), Color.Transparent)),
+                Brush.radialGradient(listOf(WarmAccent.copy(alpha = .10f), Color.Transparent)),
                 CircleShape,
             ),
         )
@@ -1047,7 +960,7 @@ private fun AmbientBackdrop() {
 private fun LoadingBlock(width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp) {
     Box(
         Modifier.width(width).height(height).clip(RoundedCornerShape(radius))
-            .background(Brush.linearGradient(listOf(Color.White.copy(alpha = .12f), Violet.copy(alpha = .06f)))),
+            .background(Brush.linearGradient(listOf(Color.White.copy(alpha = .12f), Accent.copy(alpha = .06f)))),
     )
 }
 
@@ -1060,7 +973,7 @@ private fun LoadingPosterRow() {
         repeat(5) {
             Box(
                 Modifier.width(196.dp).height(116.dp).clip(RoundedCornerShape(12.dp))
-                    .background(Brush.linearGradient(listOf(Color.White.copy(alpha = .11f), Violet.copy(alpha = .055f)))),
+                    .background(Brush.linearGradient(listOf(Color.White.copy(alpha = .11f), Accent.copy(alpha = .055f)))),
             )
         }
     }
@@ -1126,7 +1039,7 @@ private fun Home(
         val target = adjacentRowIndex(item, movieRowFocus[row].size)
         navigationJob?.cancel()
         navigationJob = scope.launch {
-            listState.scrollToItem(row)
+            listState.scrollToItem(row + 1)
             movieRowState[row].scrollToItem((target - 2).coerceAtLeast(0))
             withFrameNanos { }
             movieRowFocus[row][target].requestFocus()
@@ -1136,7 +1049,7 @@ private fun Home(
         if (!appsReady) return
         navigationJob?.cancel()
         navigationJob = scope.launch {
-            listState.animateScrollToItem(0)
+            listState.scrollToItem(0)
             val target = dockEntryIndex(appKeys, lastAppKey)
             if (appListState.layoutInfo.visibleItemsInfo.none { it.index == target }) appListState.animateScrollToItem(target)
             withFrameNanos { }
@@ -1156,7 +1069,8 @@ private fun Home(
     }
     val context = LocalContext.current
     val heroPreferences = remember(context) { context.getSharedPreferences("launcher", Context.MODE_PRIVATE) }
-    val featured = remember(sections) { sections.take(2).flatMap { it.items }.distinctBy(::mediaKey) }
+    val featured = remember(sections) { sections.firstOrNull { it.title == "Discover movies" }?.items
+        ?: sections.take(2).flatMap { it.items }.distinctBy(::mediaKey) }
     var hero by remember { mutableStateOf<MediaItem?>(null) }
     var recent by remember { mutableStateOf(listOfNotNull(heroPreferences.getString("lastFeatured", null))) }
     LaunchedEffect(featured) {
@@ -1206,7 +1120,7 @@ private fun Home(
                 use24HourClock,
                 modifier = Modifier.fillParentMaxHeight(),
                 heroAction = {
-                    if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                    if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = SecondaryText, fontSize = 13.sp)
                     hero?.let { shown -> ActionButton(
                         "Explore",
                         Modifier.focusRequester(heroFocus).onPreviewKeyEvent { event ->
@@ -1224,15 +1138,15 @@ private fun Home(
                         apps, appsReady, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
                         FocusRequester.Default,
                         focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onHiddenApps, onSettings,
-                        onRowFocused = { lastAppKey = it },
+                        onRowFocused = { if (navigationJob?.isActive != true) lastAppKey = it },
                         entryKey = lastAppKey,
                         onSearch = onSearch,
-                        onDown = if (sections.size > 1) ({ focusMovie(1, lastFirstMovieIndex) }) else null,
+                        onDown = if (sections.isNotEmpty()) ({ focusMovie(0, lastFirstMovieIndex) }) else null,
                     )
                 }
             } }
-            itemsIndexed(sections.drop(1), key = { _, section -> section.title }, contentType = { _, _ -> "movie-row" }) { visibleIndex, section ->
-                val index = visibleIndex + 1
+            itemsIndexed(sections, key = { _, section -> section.title }, contentType = { _, _ -> "movie-row" }) { visibleIndex, section ->
+                val index = visibleIndex
                 MediaRow(
                     section,
                     onSelect,
@@ -1240,15 +1154,12 @@ private fun Home(
                     movieRowFocus[index],
                     focusLift,
                     onUp = { itemIndex ->
-                        if (index == 1) focusApps()
+                        if (index == 0) focusApps()
                         else focusMovie(index - 1, itemIndex)
                     },
                     onDown = if (index < sections.lastIndex) ({ itemIndex -> focusMovie(index + 1, itemIndex) }) else null,
                     onItemFocused = { itemIndex ->
-                        if (index == 1) lastFirstMovieIndex = itemIndex
-                        if (listState.firstVisibleItemIndex != index) scope.launch {
-                            listState.animateScrollToItem(index)
-                        }
+                        if (index == 0) lastFirstMovieIndex = itemIndex
                     },
                 )
             }
@@ -1523,8 +1434,10 @@ private fun AppDock(
 ) {
     val appKeys = remember(apps) { apps.map(::launcherAppKey) }
     val entry = dockEntryIndex(appKeys, entryKey)
-    val reveal = remember { Animatable(0f) }
-    LaunchedEffect(appsReady) { if (appsReady) reveal.animateTo(1f, tween(160)) }
+    val reveal = remember { Animatable(if (appsReady) 1f else 0f) }
+    LaunchedEffect(appsReady) {
+        if (appsReady && reveal.value < 1f) reveal.animateTo(1f, tween(TvMotion.EnterMillis, easing = LinearOutSlowInEasing))
+    }
     val scope = rememberCoroutineScope()
     var moveJob by remember { mutableStateOf<Job?>(null) }
     val returnFocus = remember { FocusRequester() }
@@ -1555,7 +1468,11 @@ private fun AppDock(
             state = listState,
             contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }.focusGroup().onPreviewKeyEvent { event ->
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                // One layer for the shelf: drawing-only motion, no per-frame layout or per-app stagger.
+                alpha = reveal.value
+                translationY = (1f - reveal.value) * TvMotion.EnterDistance.toPx()
+            }.focusGroup().onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown && onDown != null && movingAppKey == null) {
                     onDown()
                     true
@@ -1585,7 +1502,7 @@ private fun AppDock(
                     },
                     onMoveDone = onMoveDone,
                     onFocused = { onRowFocused(launcherAppKey(app)) },
-                    modifier = Modifier.animateItem(fadeInSpec = tween(120), placementSpec = tween(150), fadeOutSpec = tween(90))
+                    modifier = Modifier.animateItem(fadeInSpec = tween(TvMotion.InsertMillis), placementSpec = tween(TvMotion.EnterMillis, easing = LinearOutSlowInEasing), fadeOutSpec = tween(TvMotion.RemoveMillis))
                         .then(if (index == entry) Modifier.focusRequester(firstFocus) else Modifier)
                         .then(if (launcherAppKey(app) == dockFocusKey) Modifier.focusRequester(returnFocus) else Modifier)
                         .focusProperties { up = upFocus; down = downFocus },
@@ -1601,7 +1518,7 @@ private fun AppDock(
             }
             item(key = "hidden") {
                 ShelfActionCard(
-                    "Hidden", Icons.Default.Delete, focusLift, showLabels, onHiddenApps,
+                    "Hidden", HideAppIcon, focusLift, showLabels, onHiddenApps,
                     Modifier.then(if (dockFocusKey == "hidden") Modifier.focusRequester(returnFocus) else Modifier)
                         .then(if (entry == apps.size + 1) Modifier.focusRequester(firstFocus) else Modifier).focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused("hidden") },
@@ -1647,11 +1564,11 @@ private fun ShelfActionCard(
         ) {
             Box(
                 Modifier.width(width).height(height).clip(RoundedCornerShape(16.dp))
-                    .background(PanelBrush)
-                    .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .12f), RoundedCornerShape(16.dp)),
+                    .background(if (focused) FocusSurface else ControlSurface)
+                    .border(1.dp, if (focused) FocusSurface else SubtleBorder, RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = label, tint = if (focused) Color.White else Color.White.copy(alpha = .72f), modifier = Modifier.size(28.dp))
+                Icon(icon, contentDescription = label, tint = if (focused) FocusContent else SecondaryText, modifier = Modifier.size(28.dp))
             }
             if (showLabel) {
                 Spacer(Modifier.height(8.dp))
@@ -1733,7 +1650,7 @@ private fun AppCard(
                 if (focused || moving) Box(
                     Modifier.fillMaxSize().border(
                         if (moving) 3.dp else 2.dp,
-                        if (moving) Coral else Violet,
+                        if (moving) WarmAccent else FocusSurface,
                         RoundedCornerShape(16.dp),
                     )
                 )
@@ -1742,7 +1659,7 @@ private fun AppCard(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (moving) (if (LocalRomanian.current) "←  MUTĂ $movePosition  →" else "←  MOVE $movePosition  →") else app.name,
-                    color = if (moving) Coral else Color.White.copy(alpha = if (focused) 1f else .76f),
+                    color = if (moving) WarmAccent else Color.White.copy(alpha = if (focused) 1f else .76f),
                     fontSize = 11.sp,
                     fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
@@ -1801,8 +1718,8 @@ private fun TvDialog(
             Box(
                 modifier.graphicsLayer {
                     alpha = reveal.value
-                    translationY = (1f - reveal.value) * 8.dp.toPx()
-                }.clip(DialogShape).background(Color(0xFA151921))
+                    translationY = (1f - reveal.value) * TvMotion.EnterDistance.toPx()
+                }.clip(DialogShape).background(Surface)
                     .border(1.dp, Color.White.copy(alpha = .08f), DialogShape),
             ) {
                 CompositionLocalProvider(LocalDialogReady provides ready) { content(close) }
@@ -1811,27 +1728,9 @@ private fun TvDialog(
         LaunchedEffect(Unit) {
             withFrameNanos { }
             if (closing) return@LaunchedEffect
-            reveal.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
+            reveal.animateTo(1f, tween(TvMotion.EnterMillis, easing = LinearOutSlowInEasing))
             ready = true
         }
-    }
-}
-
-@Composable
-private fun DialogHeader(
-    title: String,
-    subtitle: String,
-    modifier: Modifier = Modifier,
-    leading: (@Composable () -> Unit)? = null,
-    action: (@Composable () -> Unit)? = null,
-) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GapLarge)) {
-        leading?.invoke()
-        Column(Modifier.weight(1f)) {
-            Text(tr(title), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(tr(subtitle), color = Color.White.copy(alpha = .52f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        action?.invoke()
     }
 }
 
@@ -1851,7 +1750,7 @@ private fun TvTextField(
         onValueChange = onValueChange,
         singleLine = true,
         textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 20.sp),
-        cursorBrush = SolidColor(Violet),
+        cursorBrush = SolidColor(Accent),
         keyboardOptions = KeyboardOptions(imeAction = imeAction),
         modifier = modifier.onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
@@ -1863,7 +1762,7 @@ private fun TvTextField(
             Box(
                 Modifier.fillMaxWidth().height(60.dp).clip(ControlShape)
                     .background(Color.White.copy(alpha = if (focused) .1f else .055f))
-                    .border(if (focused) 2.dp else 1.dp, if (focused) Violet else Color.White.copy(alpha = .1f), ControlShape)
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Accent else Color.White.copy(alpha = .1f), ControlShape)
                     .padding(horizontal = 18.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -1899,45 +1798,7 @@ private fun AppOptionsDialog(
                 AppOptionTile("Move", "Reorder on Home", Icons.AutoMirrored.Filled.List, Modifier.focusRequester(first)) { choose(onMove) }
                 AppOptionTile("Rename", "Change the name shown on Home", Icons.Default.Edit) { choose(onRename) }
                 AppOptionTile("App info", "Manage or uninstall", Icons.Default.Info) { choose(onAppInfo) }
-                AppOptionTile("Hide", "Restore anytime from Hidden apps", Icons.Default.Delete) { choose(onHide) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AppOptionTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(18.dp)
-    Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth().zIndex(if (focused) 1f else 0f),
-        shape = CardDefaults.shape(shape = shape),
-        colors = CardDefaults.colors(
-            containerColor = Color.White.copy(alpha = .055f),
-            focusedContainerColor = Violet.copy(alpha = .18f),
-            pressedContainerColor = Violet.copy(alpha = .26f),
-        ),
-        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = .99f),
-        border = CardDefaults.border(
-            border = Border(BorderStroke(1.dp, Color.White.copy(alpha = .09f)), shape = shape),
-            focusedBorder = Border(BorderStroke(2.dp, Violet), shape = shape),
-        ),
-        interactionSource = interaction,
-    ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Icon(icon, contentDescription = null, tint = if (focused) Violet else Color.White.copy(alpha = .68f), modifier = Modifier.size(24.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(tr(title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Text(tr(subtitle), color = Color.White.copy(alpha = .52f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                AppOptionTile("Hide", "Restore anytime from Hidden apps", HideAppIcon) { choose(onHide) }
             }
         }
     }
@@ -2017,14 +1878,14 @@ private fun HiddenAppsDialog(
             Spacer(Modifier.height(GapLarge))
             if (apps.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Home, null, tint = Violet, modifier = Modifier.size(36.dp))
+                    Icon(Icons.Default.Home, null, tint = Accent, modifier = Modifier.size(36.dp))
                     Spacer(Modifier.height(12.dp))
                     Text(tr("No hidden apps"), fontSize = 22.sp, color = Color.White)
                     Text(tr("All your apps are on Home"), fontSize = 13.sp, color = Color.White.copy(alpha = .55f))
                 }
             } else LazyColumn(state = listState, modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }, contentType = { _, _ -> "hidden-app" }) { index, app ->
-                    Row(Modifier.animateItem(fadeInSpec = tween(120), placementSpec = tween(150), fadeOutSpec = tween(90)).fillMaxWidth().clip(ControlShape).background(Color.White.copy(alpha = .035f)).padding(14.dp),
+                    Row(Modifier.animateItem(fadeInSpec = tween(TvMotion.InsertMillis), placementSpec = tween(TvMotion.EnterMillis, easing = LinearOutSlowInEasing), fadeOutSpec = tween(TvMotion.RemoveMillis)).fillMaxWidth().clip(ControlShape).background(Color.White.copy(alpha = .035f)).padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         AsyncImage(app.icon, null, Modifier.size(42.dp), contentScale = ContentScale.Fit)
                         Text(app.name, modifier = Modifier.weight(1f), fontSize = 17.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2085,7 +1946,7 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
                     suggestions.isEmpty() -> "No locations found"
                     else -> "Choose the correct location"
                 }),
-                color = Color.White.copy(alpha = .52f),
+                color = SecondaryText,
                 fontSize = 12.sp,
             )
             Spacer(Modifier.height(Gap))
@@ -2145,7 +2006,9 @@ private fun SettingsDialog(
     onDismiss: () -> Unit,
 ) {
     val categoryFocus = remember { List(4) { FocusRequester() } }
-    val titles = listOf("HOME", "APP SHELF", "WEATHER & TIME", "SYSTEM")
+    val titles = listOf("Home", "Apps", "Weather & time", "System")
+    val contentScroll = rememberScrollState()
+    LaunchedEffect(section) { contentScroll.scrollTo(0) }
     TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.88f)) { close ->
         val ready = LocalDialogReady.current
         LaunchedEffect(ready) { if (ready) categoryFocus[section].requestFocus() }
@@ -2157,41 +2020,41 @@ private fun SettingsDialog(
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 Column(Modifier.width(184.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     titles.forEachIndexed { index, title ->
-                        ActionButton(title, Modifier.fillMaxWidth().focusRequester(categoryFocus[index]), isSelected = section == index) { onSectionChange(index) }
+                        ActionButton(title, Modifier.fillMaxWidth().focusRequester(categoryFocus[index]), onFocused = { onSectionChange(index) }, isSelected = section == index) { onSectionChange(index) }
                     }
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White.copy(alpha = .08f)))
-                Column(Modifier.weight(1f).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    Text(tr(titles[section]), color = Violet, fontSize = 12.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f).verticalScroll(contentScroll).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(tr(titles[section]), color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     when (section) {
                         0 -> {
                             Text(tr("Featured movies or a calm wallpaper"), color = Color.White, fontSize = 21.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                                 ActionButton(if (moviesEnabled) "Movies on" else "Apps only") { onMoviesEnabled(!moviesEnabled) }
-                                if (!moviesEnabled) ActionButton("New wallpaper", icon = Icons.Default.Refresh, onClick = onNextWallpaper)
+                                ActionButton("Search movies & TV", icon = Icons.Default.Search, onClick = onSearch)
                             }
+                            if (!moviesEnabled) ActionButton("New wallpaper", icon = Icons.Default.Refresh, onClick = onNextWallpaper)
                             if (moviesEnabled) {
-                                Text(tr("Ambient trailers after a quiet moment"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                                Text(tr("Ambient trailers after a quiet moment"), color = SecondaryText, fontSize = 13.sp)
                                 Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                                     ActionButton(if (theaterEnabled) "Theater on" else "Theater off") { onTheaterEnabled(!theaterEnabled) }
                                     ActionButton("After $idleMinutes min", enabled = theaterEnabled) { onIdleMinutes(nextTheaterIdleMinutes(idleMinutes)) }
                                 }
                             } else {
                                 ActionButton(if (footballWidgetEnabled) "Football on" else "Football off") { onFootballWidget(!footballWidgetEnabled) }
-                                Text(tr("Daily wallpaper · Picsum"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                                Text(tr("Daily wallpaper · Picsum"), color = SecondaryText, fontSize = 13.sp)
                             }
                         }
                         1 -> {
-                            Text(tr("Find and manage Home apps"), color = Color.White, fontSize = 21.sp)
+                            Text(tr("Manage Home apps"), color = Color.White, fontSize = 21.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
-                                ActionButton("Search", icon = Icons.Default.Search, onClick = onSearch)
                                 ActionButton("Hidden · $hiddenAppCount", icon = Icons.Default.Home, onClick = onHiddenApps)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(Gap)) {
                                 ActionButton(if (showAppLabels) "Labels on" else "Labels off") { onShowAppLabels(!showAppLabels) }
                                 ActionButton(if (focusLift) "Lifted focus" else "Outline focus") { onFocusLift(!focusLift) }
                             }
-                            Text(tr("Hold an app to move, rename or hide it"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                            Text(tr("Hold an app to move, rename or hide it"), color = SecondaryText, fontSize = 13.sp)
                         }
                         2 -> {
                             Text(tr("Location, temperature and clock"), color = Color.White, fontSize = 21.sp)
@@ -2204,7 +2067,7 @@ private fun SettingsDialog(
                         3 -> {
                             Text(tr("Home and Android controls"), color = Color.White, fontSize = 21.sp)
                             ActionButton("Device settings", Modifier.fillMaxWidth(), icon = Icons.Default.Settings, onClick = onSystemSettings)
-                            Text(tr("Network, display, sound and Android system"), color = Color.White.copy(alpha = .52f), fontSize = 13.sp)
+                            Text(tr("Network, display, sound and Android system"), color = SecondaryText, fontSize = 13.sp)
                             ActionButton("Default home", icon = Icons.Default.Home, onClick = onHomeSettings)
                             ActionButton(if (romanian) "Română" else "English") { onLanguage(!romanian) }
                         }
@@ -2216,14 +2079,13 @@ private fun SettingsDialog(
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Gap)) {
                 Text("v${BuildConfig.VERSION_NAME}", color = Color.White.copy(alpha = .44f), fontSize = 12.sp)
-                Spacer(Modifier.weight(1f))
                 AnimatedContent(
                     targetState = if (updateStatus.busy) updateStatus.label else updateStatus.message,
-                    modifier = Modifier.width(260.dp).height(40.dp),
+                    modifier = Modifier.weight(1f).height(40.dp),
                     contentAlignment = Alignment.CenterEnd,
                     transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(90)) }, label = "update status",
-                ) { message -> Text(tr(message), color = if (updateStatus.busy) Violet else Color.White.copy(alpha = .68f), fontSize = 12.sp, maxLines = 2, textAlign = TextAlign.End) }
-                ActionButton(if (updateStatus.label == "Install update") "Install update" else "Check for updates", Modifier.width(214.dp), icon = Icons.Default.Refresh) {
+                ) { message -> Text(tr(message), color = if (updateStatus.busy) Accent else Color.White.copy(alpha = .68f), fontSize = 12.sp, maxLines = 2, textAlign = TextAlign.End) }
+                ActionButton(if (updateStatus.label == "Install update") "Install update" else "Check for updates", Modifier.widthIn(min = 214.dp), icon = Icons.Default.Refresh, enabled = !updateStatus.busy) {
                     if (!updateStatus.busy) onUpdate()
                 }
             }
@@ -2346,7 +2208,7 @@ private fun SearchDialog(
                 else if (loading) LoadingPosterRow()
                 else Column(Modifier.align(Alignment.CenterStart), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(tr(if (failed) "Check your connection and search again" else if (query.trim().length >= 2) "Try a different title" else "Search movies, series and animation"),
-                    color = Color.White.copy(alpha = .52f), fontSize = 14.sp)
+                    color = SecondaryText, fontSize = 14.sp)
                     if (failed) ActionButton("Retry", icon = Icons.Default.Refresh) { retry += 1 }
                 }
             }
@@ -2427,8 +2289,11 @@ private fun LauncherStage(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                displayed?.let { "${it.year}   ·   ${tr(mediaRating(it))}" } ?: "",
-                color = Violet.copy(alpha = .95f),
+                displayed?.let { movie ->
+                    releaseLabel(movie.releaseDate).takeIf { it.startsWith("◷ COMING ") }?.let { tr(it) }
+                        ?: "${movie.year}   ·   ${tr(mediaRating(movie))}"
+                } ?: "",
+                color = Accent.copy(alpha = .95f),
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(8.dp))
@@ -2541,6 +2406,8 @@ private fun MediaRow(
                     Modifier.focusRequester(itemFocus[index]).onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
+                            Key.DirectionLeft -> index == 0
+                            Key.DirectionRight -> index == section.items.lastIndex
                             Key.DirectionUp -> { onUp(index); true }
                             Key.DirectionDown -> onDown?.let { it(index); true } ?: false
                             else -> false
@@ -2605,79 +2472,25 @@ private fun PosterCard(
         shape = CardDefaults.shape(shape = shape),
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
         scale = CardDefaults.scale(focusedScale = if (liftOnFocus) 1.025f else 1f, pressedScale = .99f),
-        border = CardDefaults.border(focusedBorder = Border(BorderStroke(3.dp, Violet), shape = shape)),
+        border = CardDefaults.border(focusedBorder = Border(BorderStroke(2.dp, FocusSurface), shape = shape)),
         interactionSource = interaction,
     ) {
-        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))) {
+        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(ControlSurface, Background)))) {
             val artwork = item.backdropUrl?.replace("/w1280/", "/w780/") ?: item.posterUrl
             if (artwork != null) AsyncImage(
                 artworkModel(artwork), item.title, Modifier.fillMaxSize(),
                 error = painterResource(R.drawable.reelora_mark), contentScale = ContentScale.Crop,
             )
             else Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(52.dp).align(Alignment.Center))
-            cardReleaseLabel(item.releaseDate)?.let { InfoBadge(it, Coral, Modifier.align(Alignment.TopStart).padding(7.dp)) }
+            cardReleaseLabel(item.releaseDate)?.let { InfoBadge(it, WarmAccent, Modifier.align(Alignment.TopStart).padding(7.dp)) }
             Box(Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter)
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))))
             Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(item.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${item.year}  ·  ${tr(mediaRating(item))}", color = Color.White.copy(alpha = .68f), fontSize = 10.sp)
+                Text(listOfNotNull(item.year, primaryGenre(item)?.let { tr(it) }, tr(mediaRating(item))).joinToString(" · "),
+                    color = Color.White.copy(alpha = .75f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-    }
-}
-
-@Composable
-private fun InfoBadge(text: String, color: Color, modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(Background.copy(alpha = .88f))
-            .border(1.dp, color.copy(alpha = .7f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 7.dp, vertical = 3.dp)
-    ) {
-        Text(tr(text), color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-    }
-}
-
-@Composable
-private fun ActionButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    onFocused: () -> Unit = {},
-    icon: ImageVector? = null,
-    enabled: Boolean = true,
-    isSelected: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    LaunchedEffect(focused) { if (focused) onFocused() }
-    Button(
-        enabled = enabled,
-        onClick = onClick,
-        modifier = modifier,
-        shape = ButtonDefaults.shape(shape = ControlShape),
-        colors = ButtonDefaults.colors(
-            containerColor = if (isSelected) Violet.copy(alpha = .16f) else Color.White.copy(alpha = .045f),
-            contentColor = Color.White.copy(alpha = .82f),
-            focusedContainerColor = Violet.copy(alpha = .22f),
-            focusedContentColor = Color.White,
-            pressedContainerColor = Violet.copy(alpha = .32f),
-            pressedContentColor = Color.White,
-        ),
-        scale = ButtonDefaults.scale(focusedScale = 1.035f, pressedScale = .99f),
-        border = ButtonDefaults.border(
-            border = Border(BorderStroke(1.dp, Color.White.copy(alpha = .09f)), shape = ControlShape),
-            focusedBorder = Border(BorderStroke(2.dp, Violet), shape = ControlShape),
-        ),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 11.dp),
-        interactionSource = interaction,
-    ) {
-        icon?.let {
-            Icon(it, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(tr(text), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -2724,11 +2537,9 @@ private fun DetailsDialog(
                   modifier = Modifier.fillMaxSize(),
               )
            }
-           Box(Modifier.fillMaxSize().background(Background.copy(alpha = .62f)))
-           Box(
-              Modifier.fillMaxWidth().height(280.dp).align(Alignment.BottomCenter)
-                  .background(Background.copy(alpha = .24f)),
-           )
+           Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+               listOf(Background.copy(alpha = .76f), Background.copy(alpha = .94f)),
+           )))
           }
           LazyColumn(
             state = listState,
@@ -2754,14 +2565,14 @@ private fun DetailsDialog(
                 Row {
                     Box(
                         Modifier.width(136.dp).height(190.dp).clip(RoundedCornerShape(14.dp))
-                            .background(Brush.linearGradient(listOf(Color(0xFF342065), Color(0xFF19192A))))
+                            .background(Brush.linearGradient(listOf(ControlSurface, Background)))
                     ) {
                         if (item.posterUrl != null) AsyncImage(artworkModel(item.posterUrl), item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         else Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(82.dp).align(Alignment.Center))
                     }
                     Spacer(Modifier.width(20.dp))
                     Column(Modifier.weight(1f)) {
-                    Text(item.title, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.title, color = Color.White, fontSize = 38.sp, lineHeight = 44.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(8.dp))
                     val metadata = listOf(
                         item.year,
@@ -2769,12 +2580,12 @@ private fun DetailsDialog(
                         details?.runtime.orEmpty(),
                         tr(mediaRating(item)),
                     ).filter { it.isNotBlank() }.joinToString("  ·  ")
-                    Text(metadata, color = Coral, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(metadata, color = WarmAccent, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(details?.genres.orEmpty(), modifier = Modifier.height(18.dp), color = Color.White.copy(alpha = .58f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.height(30.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         val release = releaseLabel(item.releaseDate)
-                        InfoBadge(release, if (release.startsWith("✓") || release.startsWith("●")) Color(0xFF66D69A) else Coral)
+                        InfoBadge(release, if (release.startsWith("✓") || release.startsWith("●")) Color(0xFF66D69A) else WarmAccent)
                         details?.availability?.let { AvailabilityBadge(it) }
                     }
                     Text(details?.availability?.let { tr("Availability by JustWatch · ${it.region}") }.orEmpty(), modifier = Modifier.height(14.dp), color = Color.White.copy(alpha = .38f), fontSize = 10.sp)
@@ -2841,7 +2652,7 @@ private fun AvailabilityBadge(availability: WatchAvailability) {
     val streaming = availability.streaming.isNotEmpty()
     val color = when {
         streaming -> Color(0xFF66D69A)
-        providers.isNotEmpty() -> Violet
+        providers.isNotEmpty() -> Accent
         else -> Color.White.copy(alpha = .5f)
     }
     Row(
@@ -2922,15 +2733,15 @@ private fun CastCard(person: CastMember, selected: Boolean, onDown: () -> Unit, 
             Box(
                 Modifier.size(58.dp).clip(CircleShape)
                     .background(Brush.linearGradient(listOf(Color(0xFF4B2B86), Color(0xFF211B3A))))
-                    .border(if (focused) 3.dp else if (selected) 2.dp else 0.dp, if (focused) Violet else Coral, CircleShape),
+                    .border(if (focused) 3.dp else if (selected) 2.dp else 0.dp, if (focused) Accent else WarmAccent, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 if (person.profileUrl != null) AsyncImage(artworkModel(person.profileUrl), person.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Text(person.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(5.dp))
-            Text(person.name, color = if (selected) Coral else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-            if (person.character.isNotBlank()) Text(person.character, color = Color.White.copy(alpha = .52f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.name, color = if (selected) WarmAccent else Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            if (person.character.isNotBlank()) Text(person.character, color = SecondaryText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
     }
 }

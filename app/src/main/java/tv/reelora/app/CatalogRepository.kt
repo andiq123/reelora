@@ -36,6 +36,8 @@ data class MediaItem(
     val posterUrl: String?,
     val backdropUrl: String?,
     val releaseDate: String = "",
+    val genreIds: List<Int> = emptyList(),
+    val popularity: Double = 0.0,
 )
 
 @Immutable data class CastMember(val id: Int, val name: String, val character: String, val profileUrl: String?)
@@ -196,6 +198,7 @@ object CatalogRepository {
         CatalogSpec(0, "Trending this week", "/trending/all/week", "movie"),
         CatalogSpec(1, "Now in cinemas", "/movie/now_playing", "movie"),
         CatalogSpec(1, "Coming soon", "/movie/upcoming", "movie"),
+        CatalogSpec(2, "Popular movies", "/movie/popular", "movie"),
         CatalogSpec(2, "Top rated movies", "/movie/top_rated", "movie"),
         CatalogSpec(3, "Popular series", "/tv/popular", "tv"),
         CatalogSpec(4, "Popular animation", "/discover/movie?with_genres=16&sort_by=popularity.desc", "movie"),
@@ -328,8 +331,15 @@ object CatalogRepository {
     }
 
     private suspend fun fetch(spec: CatalogSpec, token: String, today: LocalDate): CatalogSection {
-        val results = getJson(catalogPath(spec, today), token).getJSONArray("results")
-        return CatalogSection(spec.page, spec.title, filterSectionItems(spec.title, parseItems(results, spec.mediaType), today))
+        val paths = catalogPaths(spec, today)
+        val items = coroutineScope {
+            paths.map { path -> async {
+                parseItems(getJson(path, token).getJSONArray("results"), spec.mediaType, Int.MAX_VALUE)
+            } }.awaitAll().flatten()
+        }
+        val filtered = filterSectionItems(spec.title, items, today)
+        return CatalogSection(spec.page, spec.title,
+            if (spec.title == "Coming soon") curatedComingSoon(filtered) else filtered.take(20))
     }
 
     private fun parseItems(results: JSONArray, defaultType: String, limit: Int = 18) = buildList<MediaItem> {
@@ -353,6 +363,10 @@ object CatalogRepository {
                         posterUrl = item.image("poster_path", "w342"),
                         backdropUrl = item.image("backdrop_path", "w1280"),
                         releaseDate = date,
+                        popularity = item.optDouble("popularity", 0.0).takeIf { it.isFinite() && it >= 0.0 } ?: 0.0,
+                        genreIds = item.optJSONArray("genre_ids")?.let { ids ->
+                            (0 until ids.length()).map { ids.optInt(it) }.filter { it > 0 }.distinct()
+                        }.orEmpty(),
                     )
                 )
                 if (size == limit) break
@@ -438,17 +452,36 @@ internal fun cardReleaseLabel(date: String, today: LocalDate = LocalDate.now()):
 private fun JSONObject.text(key: String) = optString(key).takeUnless { it == "null" }.orEmpty()
 
 internal fun catalogPath(spec: CatalogSpec, today: LocalDate): String = if (spec.title == "Coming soon") {
-    "/discover/movie?primary_release_date.gte=${today.plusDays(1)}&primary_release_date.lte=${today.plusMonths(6)}&sort_by=popularity.desc&include_video=false"
+    "/discover/movie?primary_release_date.gte=${today.plusDays(1)}&primary_release_date.lte=${today.plusMonths(12)}&sort_by=popularity.desc&include_video=false"
 } else spec.path
+
+internal fun catalogPaths(spec: CatalogSpec, today: LocalDate): List<String> {
+    val path = catalogPath(spec, today)
+    return if (spec.title == "Coming soon") (1..3).map { "$path&page=$it" } else listOf(path)
+}
+
+// Rank first, then arrange the shortlist chronologically. Upcoming films need no votes yet.
+internal fun curatedComingSoon(items: List<MediaItem>): List<MediaItem> = items
+    .distinctBy { "${it.mediaType}-${it.id}" }
+    .filter { it.popularity.isFinite() && it.popularity > 0 &&
+        (!it.posterUrl.isNullOrBlank() || !it.backdropUrl.isNullOrBlank()) }
+    .sortedByDescending(MediaItem::popularity)
+    .take(40)
+    .sortedBy(MediaItem::releaseDate)
 
 internal fun filterSectionItems(title: String, items: List<MediaItem>, today: LocalDate): List<MediaItem> =
     items.distinctBy { "${it.mediaType}-${it.id}" }.filter { item ->
         val date = runCatching { LocalDate.parse(item.releaseDate) }.getOrNull()
         when (title) {
-            "Coming soon" -> item.mediaType == "movie" && date != null && date.isAfter(today)
+            "Coming soon" -> item.mediaType == "movie" && date != null && date.isAfter(today) && !date.isAfter(today.plusMonths(12))
             "Now in cinemas" -> item.mediaType == "movie" && date != null && !date.isAfter(today)
+            "Top rated movies", "Popular movies" -> item.mediaType == "movie" && date != null && !date.isAfter(today)
+            "Popular series" -> item.mediaType == "tv"
+            "Popular animation" -> item.mediaType == "movie" && 16 in item.genreIds
             else -> true
         }
+    }.let { filtered ->
+        if (title == "Coming soon") filtered.sortedBy(MediaItem::releaseDate) else filtered
     }
 
 internal fun mediaRating(item: MediaItem): String =
