@@ -86,4 +86,23 @@ class MovieDiscoveryTest {
         assertEquals(listOf(movie(1)), discoveryMovies(CatalogResult(listOf(CatalogSection(2, "Popular movies", items)), false), today))
         assertTrue(discoveryMovies(CatalogResult(emptyList(), true), today).isEmpty())
     }
+
+    @Test fun homeDoesNotRepeatDiscoveryInPopularOrLeaveEmptyShelves() {
+        val released = (1..40).map { movie(it, "2020-01-01").copy(voteCount = 300) }
+        val catalog = CatalogResult(listOf(
+            CatalogSection(2, "Popular movies", released),
+            CatalogSection(0, "Trending this week", released.take(10)),
+            CatalogSection(2, "Top rated movies", released.reversed()),
+            CatalogSection(3, "Popular series", listOf(released.first().copy(mediaType = "tv"))),
+        ), false)
+        val sections = launcherMovieSections(catalog)
+        val cards = sections.flatMap { it.items }
+        assertEquals(41, cards.size)
+        assertEquals(cards.size, cards.distinctBy(::mediaKey).size)
+        assertEquals("Discover movies", sections.first().title)
+        assertTrue(sections.all { it.items.isNotEmpty() })
+        assertTrue(sections.none { it.title == "Trending this week" || it.title == "Top rated movies" })
+        assertEquals(8, sections.single { it.title == "Popular movies" }.items.size)
+        assertEquals(sections, launcherMovieSections(catalog))
+    }
 }

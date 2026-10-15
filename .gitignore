@@ -6,6 +6,8 @@ app/build/
 local.properties
 dist/*.apk
 dist/*.sha256
+dist/*.gz
+dist/*.json
 !dist/.gitkeep
 *.iml
 *.hprof
@@ -15,4 +17,5 @@ signing.properties
 .cxx/
 .externalNativeBuild/
 captures/
+work/
 .DS_Store

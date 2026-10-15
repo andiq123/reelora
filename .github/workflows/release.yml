@@ -38,11 +38,15 @@ jobs:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: ./gradlew testDebugUnitTest lintDebug assembleRelease
+        run: |
+          ./gradlew testDebugUnitTest lintDebug lintRelease
+          sh scripts/dist.sh
 
       - name: Prepare APK
         run: |
-          cp app/build/outputs/apk/release/app-release.apk ReeloraTV-latest.apk
+          version="$(sed -n 's/^appVersionName=//p' gradle.properties)"
+          cp "dist/ReeloraTV-${version}.apk" ReeloraTV-latest.apk
+          cp "dist/ReeloraTV-${version}.mapping.txt.gz" ReeloraTV-latest.mapping.txt.gz
           sha256sum ReeloraTV-latest.apk > ReeloraTV-latest.apk.sha256
 
       - uses: actions/upload-artifact@v7
@@ -51,6 +55,7 @@ jobs:
           path: |
             ReeloraTV-latest.apk
             ReeloraTV-latest.apk.sha256
+            ReeloraTV-latest.mapping.txt.gz
 
       - name: Publish latest release
         env:

@@ -48,8 +48,9 @@ android {
 
     buildTypes {
         release {
-            // ponytail: local builds reuse the debug key; CI injects one stable private key.
+            // Preserve local upgrade compatibility; CI provides the production signing key.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
@@ -63,7 +64,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.tv:tv-material:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")

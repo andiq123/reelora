@@ -61,7 +61,7 @@ Movie search is available directly on the app shelf in both home modes. Settings
 
 ## Discovery and navigation refinements in 0.21.0
 
-Coming Soon selects up to 40 films with artwork and positive popularity from three popularity-ranked pages across the next year, then sorts this shortlist earliest first. It does not require ratings for unreleased films or fill gaps with obscure nearest-date results. Discover movies mixes popular, trending, and cinema releases, with one upcoming highlight after each four released movies. Artwork remains lazy-loaded; metadata uses the existing six-hour cache. Each category retains its own titles, deduplicated within the row. Cards show the first recognized genre from existing list metadata without extra requests. Catalog data refreshes at midnight or after six hours while Home is active. Unavailable APIs no longer produce invented movie titles, cast members, genres, or runtimes. Unrated titles show “Not rated”.
+Coming Soon selects up to 40 films with artwork and positive popularity from three popularity-ranked pages across the next year, then sorts this shortlist earliest first. It does not require ratings for unreleased films or fill gaps with obscure nearest-date results. Discover movies mixes popular, trending, and cinema releases, with one upcoming highlight after each four released movies. Artwork remains lazy-loaded; metadata uses the existing six-hour cache. Home removes titles already offered in earlier shelves, preserving category membership and source order; shelves with no remaining titles are omitted. Cards show the first recognized genre from existing list metadata without extra requests. Catalog data refreshes at midnight or after six hours while Home is active. Unavailable APIs no longer produce invented movie titles, cast members, genres, or runtimes. Unrated titles show “Not rated”.
 
 Settings uses a category sidebar and a stable update footer. Hidden apps adapts to the TV viewport and restores focus after returning apps to Home. Search has Clear and Retry actions, distinguishes unavailable search from no results, and retains results when returning from movie details. Idle theater mode pauses while a dialog is open.
 
@@ -133,10 +133,28 @@ Build `./gradlew assembleDebug`, install the debug APK on a local Android TV emu
 
 Football team flags use Android’s bundled emoji artwork and country metadata fetched only for displayed teams. Lookups have a two-second timeout and a bounded in-memory cache; match content never waits for flags. Unknown countries remain unmarked.
 
-Settings sections follow directional focus and their content scrolls for larger text. Home keeps every movie category below the hero and uses one cancellable vertical navigation operation. See [the performance and interaction audit](docs/performance-flow-audit.md) for findings and measurement limits.
+Settings sections follow directional focus and their content scrolls for larger text. Home displays nonempty movie categories below the hero and uses one cancellable vertical navigation operation. See [the performance and interaction audit](docs/performance-flow-audit.md) for findings and measurement limits.
 
 The first app shelf reveal uses one 140 ms fade with a 6 dp upward slide. Already-loaded shelves appear immediately on return; app insertion/removal uses short bounded transitions. Dialog entrances share the same restrained motion, without staggered delays.
 
 Shared colors, focus surfaces, spacing, and corner radii live in `DesignTokens.kt`. See [the design-system review](docs/design-system-review.md) for the visual rationale and verification scope.
 
+Home uses shared capsule actions, a simpler Explore control, aligned settings navigation, and a lighter floating dock over more visible artwork. Discovery shelves no longer repeat titles from earlier rows. In 0.24.12, the artwork and clock stay anchored: Down lifts the dock once and reveals one category beneath it. Further Up/Down presses slide one row through that fixed area, retaining every row's horizontal position. Back smoothly returns to the full hero. Transitions reuse native TV controls and cached artwork without blur, additional catalog requests, or new dependencies.
+
 All catalog categories sample three pages and keep up to 40 qualifying titles. Shared curation requires artwork and a synopsis; established releases need at least 20 votes and a 6/10 rating, while recent premieres can qualify before enough votes arrive. Top-rated films require 200 votes and 7/10. The series row focuses on rated narrative/documentary shows rather than news, talk, reality, or soaps. Discovery blends up to 32 released films with eight upcoming highlights, and the hero uses that same pool with backdrop artwork. Catalog requests are bounded to four concurrent fetches and retain the six-hour cache. These are transparent general-interest rules, not personalized recommendations.
+
+## Glass menus in 0.24.13
+
+Settings, app actions, search, rename, hidden apps, location selection, and movie details now share translucent graphite surfaces, softer corners, capsule controls, and compact accessible dismiss buttons. App actions float on the right; settings uses grouped navigation and a stable footer. Home controls fade away behind dialogs so artwork supplies context without overlapping labels. The treatment uses static gradients and short transitions without live blur or additional dependencies.
+
+## Rendering polish in 0.24.14
+
+Static artwork and scrims now share bounded retained layers in both Home modes and movie details. Movie cards retain their artwork and labels while native TV focus feedback animates outside them. Details skips hidden full-panel fills, and the dock stops horizontal focus at its endpoints. No visual effects, dependencies, or display overrides were added.
+
+Warm Fire TV samples improved movie-detail median frame time from 57–61 ms to 7–8 ms and shelf navigation from 18 ms to 9–10 ms. Slow frames remain, and dialog samples did not improve. See the [audit and measurement limits](docs/performance-flow-audit.md#rendering-audit-and-polish-02414-october-15-2026) for percentiles, memory tradeoffs, and reproducible checks.
+
+## Clean release in 0.24.15
+
+Removed unused UI branches, legacy helpers, and an unused preview dependency. Release builds explicitly disable debugging and retain R8 code/resource optimization and ART profiles. `sh scripts/dist.sh SERIAL` verifies the APK's version, release flags, signature, and profile, installs without clearing settings, then confirms the device APK matches byte for byte. The final APK, checksum, and compressed R8 mapping are kept in `dist/`; old local APKs and temporary captures/build outputs were cleaned up.
+
+Catalog refreshes safely replace in-flight row transitions and restore focus when categories disappear. GitHub releases run tests, both lint variants, and APK verification before publication; the workflow artifact retains the compressed R8 mapping.

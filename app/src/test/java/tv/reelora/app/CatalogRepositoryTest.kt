@@ -111,16 +111,6 @@ class CatalogRepositoryTest {
     }
 
     @Test
-    fun weatherCodesUseCompactTvSymbols() {
-        assertEquals("☀", weatherSymbol(0))
-        assertEquals("☂", weatherSymbol(61))
-        assertEquals("❄", weatherSymbol(71))
-        assertEquals("◌  Weather", weatherStatusText(null, WeatherLoadState.Loading))
-        assertEquals("!  Weather", weatherStatusText(null, WeatherLoadState.Error))
-        assertEquals("☀  24°", weatherStatusText(WeatherNow(24, 0), WeatherLoadState.Ready))
-    }
-
-    @Test
     fun clockDefaultsCanRenderEitherTvFormat() {
         val time = LocalTime.of(18, 5)
         assertEquals("18:05", formatHomeTime(time, true))
@@ -168,13 +158,11 @@ class CatalogRepositoryTest {
     @Test
     fun launcherOrderKeepsSavedAppsAndAppendsNewInstalls() {
         assertEquals(listOf("c", "a", "b"), orderedAppKeys(listOf("a", "b", "c"), listOf("missing", "c", "c", "a")))
-        assertEquals(listOf("a", "c", "b"), moveAppKey(listOf("a", "b", "c"), "b", 1))
-        assertEquals(listOf("a", "b", "c"), moveAppKey(listOf("a", "b", "c"), "a", -1))
         assertEquals(mapOf("app" to "Cinema"), savedCustomAppNames(mapOf("customName:app" to "Cinema", "other" to "ignored")))
     }
 
     @Test
-    fun categoriesKeepTheirOwnTitlesAndDeduplicateWithinEachRow() {
+    fun categoriesKeepMembershipWithoutRepeatingTitlesFromEarlierShelves() {
         fun item(id: Int) = MediaItem(id, "Title $id", "", "2026", 8.0, 1, "movie", null, null)
         val catalog = CatalogResult(
             listOf(
@@ -191,16 +179,15 @@ class CatalogRepositoryTest {
 
         assertEquals(6, sections.size)
         assertEquals(listOf(1, 2), sections.first().items.map { it.id })
-        assertEquals(listOf(1, 3), sections.single { it.title == "Trending this week" }.items.map { it.id })
+        assertEquals(listOf(3), sections.single { it.title == "Trending this week" }.items.map { it.id })
         assertEquals(listOf(6), sections.single { it.title == "Popular animation" }.items.map { it.id })
-        assertEquals(listOf(6, 7), sections.single { it.title == "Coming soon" }.items.map { it.id })
+        assertEquals(listOf(7), sections.single { it.title == "Coming soon" }.items.map { it.id })
+        assertEquals(7, sections.flatMap { it.items }.map(::mediaKey).distinct().size)
+        assertEquals(7, sections.sumOf { it.items.size })
     }
 
     @Test
-    fun verticalNavigationKeepsColumnAndClampsAtShorterRows() {
-        assertEquals(0, adjacentRowIndex(0, 6))
-        assertEquals(3, adjacentRowIndex(3, 6))
-        assertEquals(5, adjacentRowIndex(9, 6))
+    fun catalogRetryDelayBacksOffToItsLimit() {
         assertEquals(20_000L, nextCatalogRetryDelay(10_000L))
         assertEquals(300_000L, nextCatalogRetryDelay(300_000L))
     }

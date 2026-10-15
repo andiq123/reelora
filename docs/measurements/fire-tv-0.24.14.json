@@ -1,0 +1,166 @@
+{
+  "date": "2026-10-15",
+  "device": "Amazon AFTKRT, Android 11/API 30",
+  "app_viewport": "1920x1080",
+  "display_hz": 59.94,
+  "metric": "Top-level process gfxinfo percentiles in milliseconds",
+  "conditions": "Warm fixed remote sequences; same detail title; background load uncontrolled; not sustained FPS.",
+  "samples": {
+    "before_0.24.13": {
+      "details": [
+        {
+          "frame_ms": {
+            "50": 61,
+            "90": 69,
+            "95": 73,
+            "99": 73
+          },
+          "rendered_frames": 139,
+          "janky_frames": 131
+        },
+        {
+          "frame_ms": {
+            "50": 57,
+            "90": 69,
+            "95": 73,
+            "99": 77
+          },
+          "rendered_frames": 138,
+          "janky_frames": 130
+        },
+        {
+          "frame_ms": {
+            "50": 57,
+            "90": 69,
+            "95": 73,
+            "99": 73
+          },
+          "rendered_frames": 138,
+          "janky_frames": 131
+        }
+      ],
+      "shelves": [
+        {
+          "frame_ms": {
+            "50": 18,
+            "90": 30,
+            "95": 36,
+            "99": 48
+          },
+          "rendered_frames": 262,
+          "janky_frames": 92
+        },
+        {
+          "frame_ms": {
+            "50": 18,
+            "90": 28,
+            "95": 34,
+            "99": 48
+          },
+          "rendered_frames": 263,
+          "janky_frames": 84
+        }
+      ],
+      "dialogs": [
+        {
+          "frame_ms": {
+            "50": 15,
+            "90": 26,
+            "95": 34,
+            "99": 73
+          },
+          "rendered_frames": 210,
+          "janky_frames": 99
+        },
+        {
+          "frame_ms": {
+            "50": 12,
+            "90": 25,
+            "95": 30,
+            "99": 73
+          },
+          "rendered_frames": 210,
+          "janky_frames": 81
+        }
+      ]
+    },
+    "after_0.24.14": {
+      "details": [
+        {
+          "frame_ms": {
+            "50": 8,
+            "90": 19,
+            "95": 22,
+            "99": 38
+          },
+          "rendered_frames": 241,
+          "janky_frames": 43
+        },
+        {
+          "frame_ms": {
+            "50": 7,
+            "90": 12,
+            "95": 18,
+            "99": 29
+          },
+          "rendered_frames": 244,
+          "janky_frames": 14
+        },
+        {
+          "frame_ms": {
+            "50": 7,
+            "90": 18,
+            "95": 19,
+            "99": 26
+          },
+          "rendered_frames": 245,
+          "janky_frames": 29
+        }
+      ],
+      "shelves": [
+        {
+          "frame_ms": {
+            "50": 10,
+            "90": 24,
+            "95": 27,
+            "99": 61
+          },
+          "rendered_frames": 267,
+          "janky_frames": 103
+        },
+        {
+          "frame_ms": {
+            "50": 9,
+            "90": 22,
+            "95": 26,
+            "99": 65
+          },
+          "rendered_frames": 266,
+          "janky_frames": 51
+        }
+      ],
+      "dialogs": [
+        {
+          "frame_ms": {
+            "50": 14,
+            "90": 28,
+            "95": 34,
+            "99": 89
+          },
+          "rendered_frames": 206,
+          "janky_frames": 86
+        },
+        {
+          "frame_ms": {
+            "50": 18,
+            "90": 30,
+            "95": 36,
+            "99": 93
+          },
+          "rendered_frames": 208,
+          "janky_frames": 114
+        }
+      ]
+    }
+  }
+}

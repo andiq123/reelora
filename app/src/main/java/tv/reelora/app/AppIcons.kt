@@ -8,6 +8,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
+internal val ChevronRightIcon = ImageVector.Builder("Forward", 24.dp, 24.dp, 24f, 24f).apply {
+    path(fill = null, stroke = SolidColor(Color.White), strokeLineWidth = 2f,
+        strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
+        moveTo(9f, 5f); lineTo(16f, 12f); lineTo(9f, 19f)
+    }
+}.build()
+
 // Small local outline icon: hide is reversible, unlike deleting an app.
 internal val HideAppIcon = ImageVector.Builder("Hide app", 24.dp, 24.dp, 24f, 24f).apply {
     path(fill = null, stroke = SolidColor(Color.White), strokeLineWidth = 1.8f,
