@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check Device settings task isolation and Back on a TV with English Reelora UI.
 
-Start on Reelora Home with its Settings dialog closed and SYSTEM not selected.
+Start on Reelora Home with its Settings dialog closed.
 """
 import argparse
 import subprocess
@@ -35,7 +35,13 @@ def resumed():
 
 
 try:
-    press('MENU', 'DPAD_DOWN', 'DPAD_DOWN', 'DPAD_DOWN', 'DPAD_CENTER', 'DPAD_RIGHT')
+    press('MENU')
+    assert {'Check for updates', 'Install update'} & labels(), 'Settings menu was not shown'
+    for _ in range(4):
+        if 'Device settings' in labels():
+            break
+        press('DPAD_DOWN')
+    press('DPAD_CENTER', 'DPAD_RIGHT')
     assert 'Device settings' in labels(), 'SYSTEM section was not reached'
     for _ in range(2):
         press('DPAD_CENTER')

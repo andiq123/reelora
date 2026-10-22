@@ -6,6 +6,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 internal val LocalRomanian = staticCompositionLocalOf { false }
 
 private val RomanianUi = mapOf(
+    "On" to "Pornit", "Off" to "Oprit", "Home screen" to "Ecran principal", "App labels" to "Etichete aplicații",
+    "Ambient trailers" to "Trailere ambientale", "Start after" to "Pornire după", "Temperature" to "Temperatură",
+    "Clock" to "Ceas", "Language" to "Limbă", "Weather" to "Vreme",
     "Loading discovery…" to "Se încarcă recomandările…", "Discovery unavailable · your apps are ready" to "Recomandări indisponibile · aplicațiile sunt gata",
     "Not rated" to "Fără evaluare", "Retry" to "Reîncearcă", "All your apps are on Home" to "Toate aplicațiile sunt pe Acasă", "Clear" to "Șterge",
     "Ambient trailers after a quiet moment" to "Trailere după o perioadă de inactivitate",

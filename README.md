@@ -158,3 +158,11 @@ Warm Fire TV samples improved movie-detail median frame time from 57–61 ms to 
 Removed unused UI branches, legacy helpers, and an unused preview dependency. Release builds explicitly disable debugging and retain R8 code/resource optimization and ART profiles. `sh scripts/dist.sh SERIAL` verifies the APK's version, release flags, signature, and profile, installs without clearing settings, then confirms the device APK matches byte for byte. The final APK, checksum, and compressed R8 mapping are kept in `dist/`; old local APKs and temporary captures/build outputs were cleaned up.
 
 Catalog refreshes safely replace in-flight row transitions and restore focus when categories disappear. GitHub releases run tests, both lint variants, and APK verification before publication; the workflow artifact retains the compressed R8 mapping.
+
+## Refined Home and smart controls in 0.24.16
+
+The app shelf has larger tiles, softer spring focus, and artwork transitions that retain the previous image until its replacement loads. Settings and app actions use compact right-side panels, centered icons and controls, aligned values and native TV switches. Larger text and Romanian labels remain readable.
+
+Location editing clears stale selections, and search resumes an incomplete query after internet reconnects. Apps-only search skips the full discovery catalog. Remote input cancels a pending automatic-trailer lookup and restarts its idle period; daily wallpapers refresh at midnight while Home is open and on return. Existing preferences and app organization are preserved.
+
+See [the design and smart-feature audit](docs/design-system-review.md) for decisions, verification, and measurement limits.

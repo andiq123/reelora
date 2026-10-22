@@ -81,10 +81,10 @@ data class WeatherPlace(
 
 object WeatherRepository {
     private val coordinates = boundedCache<String, Pair<Double, Double>>(8)
-    suspend fun locations(query: String): List<WeatherPlace> = requestResult {
+    suspend fun locations(query: String): Result<List<WeatherPlace>> = requestResult {
         val name = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString())
         val results = readJson("https://geocoding-api.open-meteo.com/v1/search?name=$name&count=5&language=en")
-            .optJSONArray("results") ?: return emptyList()
+            .optJSONArray("results") ?: return@requestResult emptyList()
         buildList {
             for (index in 0 until results.length()) results.getJSONObject(index).let { place ->
                 add(
@@ -98,11 +98,11 @@ object WeatherRepository {
                 )
             }
         }
-    }.getOrDefault(emptyList())
+    }
 
     suspend fun current(location: String, celsius: Boolean, latitude: Double? = null, longitude: Double? = null): WeatherNow? = requestResult {
         val place = if (latitude != null && longitude != null) latitude to longitude else {
-            coordinates[location] ?: locations(location).firstOrNull()?.let {
+            coordinates[location] ?: locations(location).getOrNull()?.firstOrNull()?.let {
                 (it.latitude to it.longitude).also { point -> coordinates[location] = point }
             } ?: return null
         }
