@@ -1,0 +1,350 @@
+{
+  "date": "2026-10-22",
+  "device": "Amazon AFTKRT, Android 11/API 30",
+  "display": "59.94 Hz physical 4K mode; existing 1920x1080 app display override and density 320 left unchanged",
+  "conditions": "Warm release builds; original app settings and font scale 1.0 preserved. Background device load, feature artwork, and compilation warmth are not controlled. Not a sustained FPS benchmark.",
+  "render_samples": {
+    "before-shelves": [
+      {
+        "process_frame_ms": {
+          "50": 18,
+          "90": 30,
+          "95": 34,
+          "99": 57
+        },
+        "gfxinfo_total_and_jank": [
+          "269",
+          "145",
+          "53.90%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 18,
+          "90": 25,
+          "95": 34,
+          "99": 53
+        },
+        "gfxinfo_total_and_jank": [
+          "269",
+          "142",
+          "52.79%"
+        ]
+      }
+    ],
+    "after-shelves": [
+      {
+        "process_frame_ms": {
+          "50": 9,
+          "90": 21,
+          "95": 24,
+          "99": 81
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "101",
+          "37.41%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 10,
+          "90": 21,
+          "95": 24,
+          "99": 69
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "120",
+          "44.44%"
+        ]
+      }
+    ],
+    "cached-dock-shelves": [
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 20,
+          "95": 22,
+          "99": 77
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "103",
+          "38.15%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 6,
+          "90": 21,
+          "95": 22,
+          "99": 69
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "100",
+          "37.04%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 20,
+          "95": 22,
+          "99": 61
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "99",
+          "36.67%"
+        ]
+      }
+    ],
+    "final-shelves": [
+      {
+        "process_frame_ms": {
+          "50": 6,
+          "90": 20,
+          "95": 22,
+          "99": 61
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "76",
+          "28.15%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 8,
+          "90": 20,
+          "95": 22,
+          "99": 57
+        },
+        "gfxinfo_total_and_jank": [
+          "270",
+          "120",
+          "44.44%"
+        ]
+      }
+    ],
+    "before-dialogs": [
+      {
+        "process_frame_ms": {
+          "50": 6,
+          "90": 10,
+          "95": 10,
+          "99": 73
+        },
+        "gfxinfo_total_and_jank": [
+          "312",
+          "6",
+          "1.92%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 6,
+          "90": 10,
+          "95": 10,
+          "99": 77
+        },
+        "gfxinfo_total_and_jank": [
+          "314",
+          "6",
+          "1.91%"
+        ]
+      }
+    ],
+    "after-dialogs": [
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 10,
+          "95": 11,
+          "99": 97
+        },
+        "gfxinfo_total_and_jank": [
+          "313",
+          "8",
+          "2.56%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 10,
+          "95": 13,
+          "99": 93
+        },
+        "gfxinfo_total_and_jank": [
+          "315",
+          "12",
+          "3.81%"
+        ]
+      }
+    ],
+    "before-details": [
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 19,
+          "95": 22,
+          "99": 23
+        },
+        "gfxinfo_total_and_jank": [
+          "250",
+          "29",
+          "11.60%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 17,
+          "95": 19,
+          "99": 24
+        },
+        "gfxinfo_total_and_jank": [
+          "249",
+          "29",
+          "11.65%"
+        ]
+      }
+    ],
+    "after-details": [
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 18,
+          "95": 22,
+          "99": 24
+        },
+        "gfxinfo_total_and_jank": [
+          "249",
+          "30",
+          "12.05%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 18,
+          "95": 22,
+          "99": 24
+        },
+        "gfxinfo_total_and_jank": [
+          "249",
+          "29",
+          "11.65%"
+        ]
+      }
+    ],
+    "final-details": [
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 18,
+          "95": 22,
+          "99": 25
+        },
+        "gfxinfo_total_and_jank": [
+          "248",
+          "30",
+          "12.10%"
+        ]
+      },
+      {
+        "process_frame_ms": {
+          "50": 7,
+          "90": 9,
+          "95": 11,
+          "99": 21
+        },
+        "gfxinfo_total_and_jank": [
+          "247",
+          "4",
+          "1.62%"
+        ]
+      }
+    ]
+  },
+  "presentation_before_draw_only_rim": [
+    {
+      "flow": "dock-focus",
+      "refresh_ms": 16.683,
+      "active_intervals": 123,
+      "interval_ms": {
+        "50": 16.69,
+        "90": 33.364,
+        "95": 33.414
+      },
+      "single_refresh_intervals": 100,
+      "note": "SurfaceFlinger actual presentation times; gaps of 100 ms or more excluded as idle, bounded trailing buffer."
+    },
+    {
+      "flow": "discovery-reveal",
+      "refresh_ms": 16.683,
+      "active_intervals": 94,
+      "interval_ms": {
+        "50": 16.685,
+        "90": 16.735,
+        "95": 16.767
+      },
+      "single_refresh_intervals": 94,
+      "note": "SurfaceFlinger actual presentation times; gaps of 100 ms or more excluded as idle, bounded trailing buffer."
+    },
+    {
+      "flow": "category-slide",
+      "refresh_ms": 16.683,
+      "active_intervals": 92,
+      "interval_ms": {
+        "50": 16.685,
+        "90": 16.724,
+        "95": 16.754
+      },
+      "single_refresh_intervals": 92,
+      "note": "SurfaceFlinger actual presentation times; gaps of 100 ms or more excluded as idle, bounded trailing buffer."
+    }
+  ],
+  "presentation_final": [
+    {
+      "flow": "dock-focus",
+      "refresh_ms": 16.683,
+      "active_intervals": 88,
+      "interval_ms": {
+        "50": 16.689,
+        "90": 16.719,
+        "95": 16.738
+      },
+      "single_refresh_intervals": 88,
+      "note": "SurfaceFlinger actual presentation times; gaps of 100 ms or more excluded as idle, bounded trailing buffer."
+    },
+    {
+      "flow": "discovery-reveal",
+      "refresh_ms": 16.683,
+      "active_intervals": 94,
+      "interval_ms": {
+        "50": 16.683,
+        "90": 16.716,
+        "95": 16.741
+      },
+      "single_refresh_intervals": 94,
+      "note": "SurfaceFlinger actual presentation times; gaps of 100 ms or more excluded as idle, bounded trailing buffer."
+    },
+    {
+      "flow": "category-slide",
+      "refresh_ms": 16.683,
+      "active_intervals": 92,
+      "interval_ms": {
+        "50": 16.687,
+        "90": 16.737,
+        "95": 16.768
+      },
+      "single_refresh_intervals": 92,
+      "note": "SurfaceFlinger actual presentation times; gaps of 100 ms or more excluded as idle, bounded trailing buffer."
+    }
+  ],
+  "scope": "Physical measurements precede the number-animation addition. Fire TV became unreachable; final number transitions were visually checked on the Android TV emulator only, per user request to continue without device verification."
+}

@@ -57,6 +57,18 @@ The broader menu refinement follows primary Apple and Android guidance. These ar
 
 The audit traced settings callbacks and saved preferences, installed-app organization, catalog/search requests, weather/location lookup, football refresh and flags, idle trailers, clock/wallpaper updates, and the update installer. Existing foreground network gates, bounded caches, native app/system launches, and APK checksum/package/signing validation remain in place. No dependency, personalization engine, or extra background service is introduced.
 
+## Fire TV clipping follow-up
+
+The 0.24.16 Fire TV screenshot exposed an Apps instruction below the last focusable row. The scroll viewport cut through the sentence, and moving focus could not reveal the rest. Apps guidance and the apps-only wallpaper attribution now use the always-visible dialog subtitle instead of the scroll tail. Subtitles may wrap to two lines. Settings fills its existing safe vertical area so a two-line Romanian subtitle at 1.3× text does not clip the System category. The update footer and category grid keep their alignment.
+
+Movie browsing also exposed a second gradient ending 24 dp above the screen bottom. Remove that shelf overlay and use one full-viewport artwork gradient, with readable attribution and no horizontal seam. The stage no longer carries a fixed 548 dp height. Movie-detail badges use a minimum height so their content can grow with text. Cast names/roles reserve consistent text slots, and their row may grow above its minimum instead of cutting off character labels.
+
+The dock retains only its static glass drawing through the existing bounded cache; focus, app cards, and scrolling remain outside. See the [on-device measurements and limitations](performance-flow-audit.md#fire-tv-clipping-and-motion-follow-up-02417-october-22-2026). Native Fire TV screenshots cover all settings categories, first/last movie categories, English/Romanian at normal and 1.3× text, and focus on the last Apps toggle. Original language, text size, app-label/focus settings, hidden apps, display mode, and display overrides are preserved.
+
+Clock hours and minutes transition independently with a 240 ms quarter-line slide and fade. Temperature values share that motion; their degree symbol and unchanged weather icon remain steady. Tabular numerals avoid digit-width jitter, loading placeholders only fade, and the initial render is static. Each clock/temperature exposes one current accessibility value instead of outgoing/incoming duplicates. Native Compose motion follows the system animator scale. The clock retains its existing minute-boundary, foreground-only updates and weather retains its existing refresh schedule. See [Android's animation guidance](https://developer.android.com/develop/ui/compose/animation/composables-modifiers).
+
+An excluded debug fixture exercises midnight/noon, 12/24-hour formats, digit-count and sign changes, and loading temperatures through the actual Home controls. Emulator recordings and screenshots check normal/enlarged text and system animations disabled. Fire TV became unreachable before this numeric addition; the user requested continuing without device verification, so the earlier physical-device frame measurements do not measure the new number transitions.
+
 ## Verification
 
 The smart-feature follow-up passes 44 unit tests (including lookup cancellation, renewed idle timing, and unavailable-trailer retry), debug/release lint, and debug/minified-release builds. Final emulator captures cover the corrected grid in all four categories at 1.3× text, plus enlarged Romanian labels; category names remain readable without truncation. Remote checks cover category entry/return, switch semantics, toggle restoration, and the last app-menu action. Enlarged movie details also open with the shared action controls and return with Back. A real location lookup verifies that selecting then clearing a city removes Use location without saving. A Wi-Fi reconnect check verifies that movie search hides previous-query cards while offline and automatically loads the edited query after connectivity returns. Original text size, language, toggle settings, and Wi-Fi state are restored. Midnight rollover is source-reviewed; actual overnight behavior, production update installation, full TalkBack navigation, and physical-TV frame timing were not measured for this pass.
@@ -78,6 +90,7 @@ The release combines the artwork, dock, menu, accessibility, alignment, and smar
 | --- | --- |
 | `DesignTokens.kt` | Palette, focus colors, shared geometry, spacing, and entrance/placement timing. |
 | `TvControls.kt` | Shared buttons, action rows, dialog headers, compact badges, and dock focus motion; typography and interactive states live here. |
+| `StatusNumbers.kt` | Clock/temperature formatting layout and native, change-triggered numeric motion. |
 | `ArtworkBackdrop.kt` | Bounded retained artwork/scrim layer shared by Home and movie details, plus load-aware hero artwork transitions; dynamic controls stay outside. |
 | `AppIcons.kt` | Small local semantic icons absent from the existing icon set. |
 | `UiStrings.kt` | Shared language context, translations, and formatting fallbacks. |

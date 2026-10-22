@@ -166,3 +166,9 @@ The app shelf has larger tiles, softer spring focus, and artwork transitions tha
 Location editing clears stale selections, and search resumes an incomplete query after internet reconnects. Apps-only search skips the full discovery catalog. Remote input cancels a pending automatic-trailer lookup and restarts its idle period; daily wallpapers refresh at midnight while Home is open and on return. Existing preferences and app organization are preserved.
 
 See [the design and smart-feature audit](docs/design-system-review.md) for decisions, verification, and measurement limits.
+
+## Fire TV layout and motion fixes in 0.24.17
+
+Settings keeps app-organization guidance in its visible header and uses the available panel height, including with enlarged Romanian text. Movie browsing has one continuous background gradient through the screen bottom. The dock reuses a bounded rendering cache for its static glass while focus and app scrolling remain independent. Existing preferences are preserved. See [the Fire TV measurements and limits](docs/performance-flow-audit.md#fire-tv-clipping-and-motion-follow-up-02417-october-22-2026).
+
+Clock hours/minutes and weather temperatures now change with a subtle 240 ms slide and fade. Colons and degree symbols stay still, tabular digits keep widths steady, and loading placeholders fade in place. Native motion respects the system animation scale and adds no continuous animation, polling, or dependency.

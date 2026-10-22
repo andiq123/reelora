@@ -134,6 +134,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -1016,7 +1019,6 @@ private fun Home(
     val chromeReveal = rememberHomeChrome(covered)
     val appListState = rememberLazyListState()
     val shelfHeight = with(LocalDensity.current) { 212.dp + 28.sp.toDp() }
-    val shelfScrim = remember { Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .64f))) }
     var catalogOpen by remember { mutableStateOf(false) }
     var displayedRow by remember { mutableStateOf(0) }
     val browseReveal = remember { Animatable(0f) }
@@ -1198,7 +1200,7 @@ private fun Home(
                     .fillMaxWidth().height(shelfHeight).graphicsLayer {
                         translationY = (1f - browseReveal.value) * (shelfHeight + 24.dp).toPx()
                         alpha = chromeReveal.value
-                    }.clipToBounds().background(shelfScrim).padding(vertical = 8.dp)) {
+                    }.clipToBounds().padding(vertical = 8.dp)) {
                     // A refreshed catalog must dispose transitions that refer to its old indices.
                     key(sections) { AnimatedContent(
                         targetState = displayedRow.coerceIn(sections.indices),
@@ -1223,7 +1225,7 @@ private fun Home(
                         )
                     } }
                     Text(tr("Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo"),
-                        color = SecondaryText, fontSize = 10.sp, lineHeight = 14.sp,
+                        color = SecondaryText, fontSize = 11.sp, lineHeight = 16.sp,
                         modifier = Modifier.padding(horizontal = 48.dp))
                 }
             }
@@ -1527,11 +1529,13 @@ private fun AppDock(
     Box(
         modifier.fillMaxWidth().height(AppTileHeight + 32.dp + labelSpace)
             .padding(horizontal = 48.dp)
-            .clip(DockShape)
-            .background(DockSurface)
-            .background(dockSheen)
-            .border(1.dp, dockEdge, DockShape),
+            .clip(DockShape),
     ) {
+        // Retain the static glass; changing focus and scrolling stay outside its bounded layer.
+        ArtworkBackdrop {
+            Box(Modifier.fillMaxSize().background(DockSurface).background(dockSheen)
+                .border(1.dp, dockEdge, DockShape))
+        }
         if (!appsReady) {
             Row(Modifier.padding(horizontal = 22.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 repeat(5) {
@@ -1684,7 +1688,7 @@ private fun AppCard(
     val pressed by interaction.collectIsPressedAsState()
     val tileWidth = AppTileWidth
     val tileHeight = AppTileHeight
-    val focusEdge by animateColorAsState(
+    val focusEdge = animateColorAsState(
         if (moving) WarmAccent else if (focused) FocusSurface else Color.Transparent,
         tween(180), label = "App focus edge",
     )
@@ -1732,13 +1736,15 @@ private fun AppCard(
                     contentScale = if (app.banner == null) ContentScale.Fit else ContentScale.Crop,
                     modifier = if (app.banner == null) Modifier.fillMaxWidth(.82f).fillMaxHeight(.78f) else Modifier.fillMaxSize(),
                 )
-                Box(
-                    Modifier.fillMaxSize().border(
-                        if (moving) 3.dp else 2.dp,
-                        focusEdge,
-                        AppTileShape,
-                    )
-                )
+                Box(Modifier.fillMaxSize().drawWithCache {
+                    val outline = AppTileShape.createOutline(size, layoutDirection, this)
+                    // The tile clips the outer half of the stroke, keeping the rim inside its shape.
+                    val stroke = Stroke((if (moving) 6.dp else 4.dp).toPx())
+                    onDrawBehind {
+                        val edge = focusEdge.value
+                        if (edge.alpha > 0f) drawOutline(outline, edge, style = stroke)
+                    }
+                })
             }
             if (showLabel || moving) {
                 Spacer(Modifier.height(8.dp))
@@ -2108,11 +2114,16 @@ private fun SettingsDialog(
     val contentScroll = rememberScrollState()
     LaunchedEffect(section) { contentScroll.scrollTo(0) }
     CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
-    TvDialog(onDismiss, Modifier.width(580.dp).fillMaxHeight(.92f), alignment = Alignment.CenterEnd) { close ->
+    TvDialog(onDismiss, Modifier.width(580.dp).fillMaxHeight(), alignment = Alignment.CenterEnd) { close ->
         val ready = LocalDialogReady.current
         LaunchedEffect(ready) { if (ready) categoryFocus[section].requestFocus() }
         Column(Modifier.padding(24.dp).focusRestorer(categoryFocus[section]).focusGroup()) {
-            DialogHeader("Settings", if (section == 2) "Weather & time" else titles[section], action = {
+            DialogHeader("Settings", when (section) {
+                1 -> "Hold an app to move, rename or hide it"
+                2 -> "Weather & time"
+                0 -> if (moviesEnabled) titles[section] else "Daily wallpaper · Picsum"
+                else -> titles[section]
+            }, action = {
                 ActionButton("Done", icon = Icons.Default.Check, iconOnly = true, onClick = close)
             })
             Spacer(Modifier.height(20.dp))
@@ -2143,14 +2154,12 @@ private fun SettingsDialog(
                             } else {
                                 SettingsRow("New wallpaper", navigation = false, onClick = onNextWallpaper)
                                 SettingsRow("Football", checked = footballWidgetEnabled) { onFootballWidget(!footballWidgetEnabled) }
-                                Text(tr("Daily wallpaper · Picsum"), Modifier.padding(8.dp), color = SecondaryText, fontSize = 12.sp)
                             }
                         }
                         1 -> {
                             SettingsRow("Hidden apps", Modifier.focusRequester(contentFocus), value = hiddenAppCount.toString(), onClick = onHiddenApps)
                             SettingsRow("App labels", checked = showAppLabels) { onShowAppLabels(!showAppLabels) }
                             SettingsRow("Lifted focus", checked = focusLift) { onFocusLift(!focusLift) }
-                            Text(tr("Hold an app to move, rename or hide it"), Modifier.padding(8.dp), color = SecondaryText, fontSize = 13.sp, lineHeight = 18.sp)
                         }
                         2 -> {
                             SettingsRow("Weather location", Modifier.focusRequester(contentFocus), value = weatherLocation, onClick = onWeatherLocation)
@@ -2335,8 +2344,7 @@ private fun LauncherStage(
     }
     Box(
         modifier
-            .fillMaxWidth()
-            .height(548.dp)
+            .fillMaxSize()
             .clipToBounds()
             .background(Background)
     ) {
@@ -2357,7 +2365,7 @@ private fun LauncherStage(
                         0f to Background.copy(alpha = .32f),
                         .28f to Color.Transparent,
                         .65f to Color.Transparent,
-                        1f to Background.copy(alpha = .74f),
+                        1f to Background.copy(alpha = .88f),
                     )
                 )
             )
@@ -2425,27 +2433,23 @@ internal fun HomeStatus(
         }
     }
     Column(modifier, horizontalAlignment = Alignment.End) {
-        Text(
-            formatHomeTime(time, use24HourClock), color = Color.White, fontSize = 28.sp,
-            fontWeight = FontWeight.Medium, letterSpacing = (-.5).sp,
-        )
+        HomeClock(time, use24HourClock)
         Spacer(Modifier.height(6.dp))
-        AnimatedContent(
-            targetState = weather,
-            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) },
-            label = "weather update",
-        ) { shown ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                val kind = shown?.let { weatherKind(it.code, it.isDay) } ?: WeatherKind.Unknown
-                if (shown == null) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            AnimatedContent(
+                targetState = weather?.let { weatherKind(it.code, it.isDay) },
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) },
+                label = "Weather icon",
+            ) { kind ->
+                if (kind == null) {
                     Icon(Icons.Default.Refresh, contentDescription = tr("Loading weather"), tint = Color(0xFFB4D8FF), modifier = Modifier.size(32.dp))
                 } else {
                     Icon(androidx.compose.ui.res.painterResource(kind.icon), contentDescription = tr(kind.label),
                         tint = Color(kind.color), modifier = Modifier.size(32.dp))
                 }
-                Text(shown?.let { "${it.temperature}°" } ?: "—°", color = Color.White, fontSize = 27.sp,
-                    fontWeight = FontWeight.Medium, style = FootballTextStyle)
             }
+            HomeTemperature(weather?.temperature, FootballTextStyle.copy(
+                color = Color.White, fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.Medium))
         }
         if (weather == null || weatherState == WeatherLoadState.Error) {
             Text(tr(if (!LocalInternet.current) "Waiting for internet" else if (weatherState == WeatherLoadState.Error) "Updating weather" else "Loading weather"),
@@ -2669,7 +2673,7 @@ private fun DetailsDialog(
                     Text(metadata, color = WarmAccent, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(details?.genres.orEmpty(), modifier = Modifier.heightIn(min = 18.dp), color = SecondaryText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(8.dp))
-                    Row(Modifier.height(30.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.heightIn(min = 30.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         val release = releaseLabel(item.releaseDate)
                         InfoBadge(release, if (release.startsWith("✓") || release.startsWith("●")) Color(0xFF66D69A) else WarmAccent)
                         details?.availability?.let { AvailabilityBadge(it) }
@@ -2683,7 +2687,7 @@ private fun DetailsDialog(
             item { Column {
                 Text(tr("Cast"), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
-                Box(Modifier.height(with(LocalDensity.current) { 90.dp + 44.sp.toDp() })) { CastRow(
+                Box(Modifier.heightIn(min = with(LocalDensity.current) { 90.dp + 44.sp.toDp() })) { CastRow(
                     details?.cast,
                     selectedActor,
                     onDown = {
@@ -2825,8 +2829,8 @@ private fun CastCard(person: CastMember, selected: Boolean, onDown: () -> Unit, 
                 else Text(person.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(5.dp))
-            Text(person.name, color = if (selected) WarmAccent else Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-            if (person.character.isNotBlank()) Text(person.character, color = SecondaryText, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.name, color = if (selected) WarmAccent else Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.character, color = SecondaryText, fontSize = 12.sp, lineHeight = 14.sp, minLines = 1, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
     }
 }

@@ -150,3 +150,46 @@ Old local APKs, intermediate build outputs, project build caches, temporary scre
 Release review follow-up: when refreshed categories shrink during a slide, the row transition is recreated with the new catalog and focus is clamped to an available row or the dock. This prevents outgoing content from indexing a replaced category list. GitHub publishing now runs both lint variants and the same APK verification used locally, retaining the compressed R8 mapping in the workflow artifact.
 
 An emulator fixture changed the catalog from multiple rows to one during a slide, then to zero. Dock focus returned and the process remained alive; the temporary fixture was removed before the production build.
+
+## Fire TV clipping and motion follow-up (0.24.17, October 22, 2026)
+
+### Findings and changes
+
+- Apps instructions were below the last focusable setting, clipped by the scroll viewport and unreachable with the remote. Move that copy and apps-only wallpaper attribution into the visible header. Allow two subtitle lines and fill the existing safe panel height, including enlarged Romanian text.
+- The movie shelf painted a second gradient that stopped 24 dp above the viewport bottom. Remove it and use one continuous full-screen artwork gradient. Remove the stage's obsolete fixed height and improve attribution readability.
+- The dock repainted its static glass fill, sheen, and rim during motion. Retain those through the existing bounded drawing cache while app cards, focus, and scrolling remain independent.
+- The animated app rim color was read during composition. Read it only while drawing, cache the existing tile outline, and skip the transparent rim. Its geometry, spring motion, press response, and Move state remain intact.
+- Enlarged cast labels exposed another fixed-height ceiling. Let the cast row grow above its reserved minimum and reserve consistent name/role text slots. Detail badges also use a minimum height.
+- Clock hours/minutes and temperatures use a short slide/fade only on value changes. Symbols remain steady, loading placeholders fade, and weather icons transition independently of temperature. Native animation-scale handling, tabular digits, and one accessibility value per number avoid extra timers and duplicate announcements.
+
+### Device and method
+
+Amazon AFTKRT, Android 11/API 30. The physical display reports 4K at 59.94 Hz; its existing 1920×1080 app display override and density 320 were left unchanged. Rendering samples use font scale 1.0, warm release builds, the existing `scripts/profile-interactions.py` sequences, and no external media playback changes. The initial media sessions were inactive/paused. Background system load, artwork, and compilation warmth are not controlled, so these are practical short samples rather than a laboratory benchmark.
+
+| Warm flow | Original median / p95 | Fixed median / p95 |
+| --- | --- | --- |
+| Mixed shelf navigation | 18 / 34 ms (2 samples) | 6–8 / 22 ms (2 final samples) |
+| Settings open/navigation/close | 6 / 10 ms (2 samples) | 7 / 11–13 ms (2 samples) |
+| Movie details | 7 / 19–22 ms (2 samples) | 7 / 11–22 ms (2 final samples) |
+
+Removing the shelf overlay first measured 9–10 / 24 ms. Retaining the dock glass measured 6–7 / 22 ms across three samples. The final draw-only rim keeps mixed navigation within a similar range. Settings samples do not demonstrate a speed improvement; their p99 opening tails remain around 93–97 ms versus 73–77 ms originally. Mixed shelf p99 remains 57–61 ms, and `gfxinfo` still marks 28–44% of frames janky in that broader sequence. Smooth warm animation does not eliminate mount, input-handoff, or scheduling stalls.
+
+The compositor check reads actual presentation timestamps from `dumpsys SurfaceFlinger --latency` for Reelora's current activity surface, keeping only timestamps newer than the sample start and excluding gaps of 100 ms or more as idle. Four directional movements per flow produced these bounded trailing samples:
+
+| Final warm animation | Active intervals | Median | p95 | Within one refresh interval (allowing timestamp jitter) |
+| --- | --- | --- | --- | --- |
+| Dock focus | 88 | 16.689 ms | 16.738 ms | 88 / 88 |
+| Discovery reveal/return | 94 | 16.683 ms | 16.741 ms | 94 / 94 |
+| Category slide | 92 | 16.687 ms | 16.768 ms | 92 / 92 |
+
+An earlier candidate's dock-focus sample had a 33.414 ms p95. The final sample matches the display's approximately 16.683 ms refresh period. These isolated warm movements differ from the mixed interaction benchmark above; neither proves sustained 60 FPS under every load. Driver GPU percentiles remain excluded because this vendor can report invalid timestamps.
+
+The compact [measurement record](measurements/fire-tv-0.24.17.json) includes original, intermediate, and final render samples and compositor cadence. The dock's additional retained texture is approximately 1.4–1.9 MiB for the tested UI, depending on labels/text size; it reuses the existing Full HD pixel-area cap. There is no claim of reduced memory consumption.
+
+### Layout and release checks
+
+Native screenshots cover all four settings categories, the last Apps toggle, English/Romanian at normal and 1.3× text, first/last movie categories, app-menu actions, rename, search, movie details/cast/similar, and apps-only Home. Remote input reaches the last controls, and Back returns through dialogs to Home. Move mode is checked without reordering. Original font scale, language, Home mode, app-label/focus settings, app names/order/visibility, and display configuration are preserved. Fire TV's UIAutomator does not provide a usable hierarchy; screenshot review complements direct remote input instead.
+
+All 44 unit tests, debug/release lint, debug assembly, and optimized release assembly pass. Distribution verification checks the manifest/version, release flags, signature, R8 mapping, and ART profile. The earlier clipping/rendering candidate was installed on Fire TV with app data preserved and its APK compared byte for byte. The device became unreachable before the number-animation addition; the user requested continuing without device verification. The physical measurements above therefore cover the clipping/rendering changes before that addition, rather than the final published artifact or number transitions.
+
+The number transitions are checked with actual Home controls in an excluded debug fixture on the Android TV API 31 emulator. Recordings and screenshots cover midnight/noon, 12/24-hour formats, negative/zero temperatures, digit-count changes, loading placeholders, 1.0×/1.3× text, and system animations disabled. Emulator recordings are visual evidence, not Fire TV performance measurements. Original emulator settings are restored. No dependency, background service, new image request, hidden UI precomposition, or change to existing focus durations is introduced.

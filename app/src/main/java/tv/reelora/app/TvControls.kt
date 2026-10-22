@@ -74,7 +74,7 @@ internal fun DialogHeader(
         Column(Modifier.weight(1f)) {
             Text(tr(title), color = Color.White, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
-            Text(tr(subtitle), color = SecondaryText, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(tr(subtitle), color = SecondaryText, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         action?.invoke()
     }

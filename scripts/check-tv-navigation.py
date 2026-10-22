@@ -34,7 +34,7 @@ def focused():
 def clock_anchor():
     import re
     for node in tree().iter('node'):
-        if re.fullmatch(r'\d{1,2}:\d{2}(?: [AP]M)?', node.get('text', '')):
+        if re.fullmatch(r'\d{1,2}:\d{2}(?: [AP]M)?', node.get('text') or node.get('content-desc', '')):
             bounds = tuple(map(int, re.findall(r'\d+', node.get('bounds', ''))))
             return bounds[2], bounds[1]
     raise AssertionError('The anchored clock disappeared')
