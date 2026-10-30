@@ -233,12 +233,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Compose consumes D-pad keys before onKeyDown, so idle timing observes dispatch instead.
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) inputEvents.trySend(Unit)
-        return super.dispatchKeyEvent(event)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         updater = AppUpdater(this)
@@ -450,6 +444,8 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         Box(
             Modifier.fillMaxSize().background(Background).onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // Preview sees D-pad keys before controls consume them, so browsing resets idle time.
+                inputEvents.trySend(Unit)
                 val wasPlaying = theater != null
                 theater = null
                 if (wasPlaying) {
