@@ -13,6 +13,12 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.Collections
@@ -20,6 +26,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Cache
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -65,7 +72,7 @@ data class MediaDetails(
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
 @Immutable data class WeatherNow(val temperature: Int, val code: Int, val isDay: Boolean = true)
-@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "", val competition: String = "", val priority: Int = 99, val homeId: String = "", val awayId: String = "", val homeCountry: String = "", val awayCountry: String = "")
+@Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "", val competition: String = "", val priority: Int = 99, val homeId: String = "", val awayId: String = "", val homeCountry: String = "", val awayCountry: String = "", val kickoff: Instant? = null)
 @Immutable data class FootballHint(val competition: String, val days: Int)
 @Immutable data class FootballSnapshot(val live: FootballMatch?, val next: FootballMatch?, val previous: FootballMatch?, val hint: FootballHint? = null)
 @Immutable
@@ -125,68 +132,129 @@ object FootballRepository {
             requestResult {
                 readJson("$BASE/lookupteam.php?id=$id").optJSONArray("teams")
                     ?.optJSONObject(0)?.optString("strCountry").orEmpty().takeIf { it != "null" }.orEmpty()
-            }.getOrNull()?.also { countries[id] = it }
+            }.getOrNull()?.takeIf(String::isNotBlank)?.also { countries[id] = it }
         }.orEmpty()
     }
 
     private val leagues = listOf("4429" to "WORLD CUP", "4480" to "CHAMPIONS LEAGUE", "4328" to "PREMIER LEAGUE")
 
     suspend fun load(): FootballSnapshot? = withContext(Dispatchers.Default) {
-        val today = LocalDate.now()
+        val now = Instant.now()
+        val today = now.atOffset(ZoneOffset.UTC).toLocalDate()
+        // A match that kicked off before UTC midnight can still be in play.
+        val liveDays = if (now.atOffset(ZoneOffset.UTC).hour < 4) listOf(today.minusDays(1), today) else listOf(today)
         val matches = leagues.mapIndexed { priority, (id, name) ->
             async {
                 coroutineScope {
-                    val live = async { requestResult { readJson("$BASE/eventsday.php?d=$today&l=$id").liveFootballMatch(name, priority) }.getOrNull() }
-                    val next = async { requestResult { readJson("$BASE/eventsnextleague.php?id=$id").firstFootballMatch(name, priority) }.getOrNull() }
-                    val previous = async { requestResult { readJson("$BASE/eventspastleague.php?id=$id").firstFootballMatch(name, priority) }.getOrNull() }
+                    val live = async {
+                        liveDays.map { day -> async {
+                            requestResult { readJson("$BASE/eventsday.php?d=$day&l=$id").footballMatches(name, priority) }.getOrNull().orEmpty()
+                        } }.awaitAll().flatten()
+                    }
+                    val next = async { requestResult { readJson("$BASE/eventsnextleague.php?id=$id").footballMatches(name, priority) }.getOrNull().orEmpty() }
+                    val previous = async { requestResult { readJson("$BASE/eventspastleague.php?id=$id").footballMatches(name, priority) }.getOrNull().orEmpty() }
                     listOf(live.await(), next.await(), previous.await())
                 }
             }
         }.awaitAll()
-        val live = matches.mapNotNull { it[0] }.minByOrNull(FootballMatch::priority)
-        val upcoming = matches.mapNotNull { it[1] }
+        val live = matches.flatMap { it[0] }.filter { isLiveFootballMatch(it, now) }
+            .minByOrNull(FootballMatch::priority)
+        val upcoming = matches.flatMap { it[0] + it[1] }.filter { isUpcomingFootballMatch(it, now) }
         val next = selectNextFootballMatch(upcoming)
-        val previous = matches.mapNotNull { it[2] }.maxWithOrNull(compareBy<FootballMatch> { footballDateRank(it.date) }.thenBy { -it.priority })
+        val previous = selectPreviousFootballMatch(matches.flatMap { it[0] + it[2] }, now)
         val hint = upcoming.mapNotNull { match ->
-            (footballDateRank(match.date) - today.toEpochDay()).toInt().takeIf { it in 0..90 }?.let { FootballHint(match.competition, it) }
+            footballMatchDay(match)?.let { java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), it) }
+                ?.takeIf { it in 0..90 }?.let { FootballHint(match.competition, it.toInt()) }
         }.minWithOrNull(compareBy<FootballHint> { hint -> leagues.indexOfFirst { it.second == hint.competition } }.thenBy(FootballHint::days))
         FootballSnapshot(live, next, previous, hint).takeIf { it.live != null || it.next != null || it.previous != null }
     }
 }
 
-internal fun footballRefreshInterval(snapshot: FootballSnapshot): Long =
-    if (snapshot.live != null || snapshot.next?.date == LocalDate.now().toString()) 2 * 60_000L else 10 * 60_000L
-
-internal fun JSONObject.firstFootballMatch(competition: String = "", priority: Int = 99): FootballMatch? =
-    optJSONArray("events")?.optJSONObject(0)?.footballMatch(competition, priority)
-
-private fun JSONObject.liveFootballMatch(competition: String, priority: Int): FootballMatch? = optJSONArray("events")?.let { events ->
-    (0 until events.length()).mapNotNull { events.optJSONObject(it)?.footballMatch(competition, priority) }.firstOrNull { isLiveFootballStatus(it.status) }
+// Poll every two minutes only around play: from 15 minutes before a known kickoff until
+// three hours after it. Before that, sleep until the window opens (at most 30 minutes).
+internal fun footballRefreshInterval(snapshot: FootballSnapshot, now: Instant = Instant.now()): Long {
+    val fast = 2 * 60_000L
+    if (snapshot.live != null) return fast
+    snapshot.next?.kickoff?.let { kickoff ->
+        val untilWindow = java.time.Duration.between(now, kickoff.minusSeconds(15 * 60)).toMillis()
+        val sinceKickoff = java.time.Duration.between(kickoff, now).toMillis()
+        return when {
+            untilWindow > 0 -> untilWindow.coerceIn(fast, 30 * 60_000L)
+            sinceKickoff < 3 * 60 * 60_000L -> fast
+            else -> 30 * 60_000L
+        }
+    }
+    return if (snapshot.next?.let(::footballMatchDay) == LocalDate.now()) fast else 10 * 60_000L
 }
 
-private fun JSONObject.footballMatch(competition: String, priority: Int) = FootballMatch(
-    home = optString("strHomeTeam"),
-    away = optString("strAwayTeam"),
-    date = optString("dateEventLocal").ifBlank { optString("dateEvent") },
-    time = optString("strTimeLocal").ifBlank { optString("strTime") }.take(5),
-    homeScore = optString("intHomeScore").toIntOrNull(),
-    awayScore = optString("intAwayScore").toIntOrNull(),
-    status = optString("strProgress").ifBlank { optString("strStatus") },
-    competition = competition,
-    priority = priority,
-    homeId = optString("idHomeTeam"),
-    awayId = optString("idAwayTeam"),
-)
+internal fun JSONObject.footballMatches(competition: String = "", priority: Int = 99): List<FootballMatch> {
+    val events = optJSONArray("events") ?: return emptyList()
+    return (0 until events.length()).mapNotNull { events.optJSONObject(it)?.footballMatch(competition, priority) }
+}
 
-private fun footballDateRank(date: String) = runCatching { LocalDate.parse(date).toEpochDay() }.getOrDefault(Long.MAX_VALUE)
+private fun JSONObject.footballMatch(competition: String, priority: Int): FootballMatch? {
+    val home = text("strHomeTeam")
+    val away = text("strAwayTeam")
+    if (home.isBlank() || away.isBlank()) return null
+    val kickoff = footballKickoff(text("strTimestamp"), text("dateEvent"), text("strTime"))
+    return FootballMatch(
+        home = home,
+        away = away,
+        date = kickoff?.atOffset(ZoneOffset.UTC)?.toLocalDate()?.toString()
+            ?: runCatching { LocalDate.parse(text("dateEvent")) }.getOrNull()?.toString().orEmpty(),
+        time = kickoff?.atOffset(ZoneOffset.UTC)?.toLocalTime()?.format(DateTimeFormatter.ofPattern("HH:mm")).orEmpty(),
+        homeScore = text("intHomeScore").toIntOrNull()?.takeIf { it >= 0 },
+        awayScore = text("intAwayScore").toIntOrNull()?.takeIf { it >= 0 },
+        status = text("strStatus").ifBlank { text("strProgress") },
+        competition = competition,
+        priority = priority,
+        homeId = text("idHomeTeam"),
+        awayId = text("idAwayTeam"),
+        homeCountry = text("strHomeTeamCountry"),
+        awayCountry = text("strAwayTeamCountry"),
+        kickoff = kickoff,
+    )
+}
 
-internal fun selectNextFootballMatch(matches: List<FootballMatch>) =
-    matches.minWithOrNull(compareBy<FootballMatch> { footballDateRank(it.date) }.thenBy(FootballMatch::priority))
+internal fun footballKickoff(timestamp: String, date: String, time: String): Instant? =
+    runCatching { OffsetDateTime.parse(timestamp).toInstant() }.getOrNull()
+        ?: runCatching { LocalDateTime.parse(timestamp).toInstant(ZoneOffset.UTC) }.getOrNull()
+        ?: runCatching { LocalDate.parse(date).atTime(LocalTime.parse(time)).toInstant(ZoneOffset.UTC) }.getOrNull()
+
+internal fun footballMatchDay(match: FootballMatch, zone: ZoneId = ZoneId.systemDefault()): LocalDate? =
+    match.kickoff?.atZone(zone)?.toLocalDate() ?: runCatching { LocalDate.parse(match.date) }.getOrNull()
+
+private fun footballMatchOrder(match: FootballMatch): Instant? = match.kickoff
+    ?: runCatching { LocalDate.parse(match.date).atTime(LocalTime.parse(match.time.ifBlank { "00:00" })).toInstant(ZoneOffset.UTC) }.getOrNull()
+
+private fun isUpcomingFootballMatch(match: FootballMatch, now: Instant): Boolean =
+    match.status.trim().lowercase(Locale.ROOT) in setOf("", "ns", "not started", "tbd", "time to be defined") &&
+        (match.kickoff?.let { !it.isBefore(now) }
+            ?: (footballMatchDay(match)?.let { !it.isBefore(now.atZone(ZoneId.systemDefault()).toLocalDate()) } == true))
+
+internal fun selectNextFootballMatch(matches: List<FootballMatch>, now: Instant = Instant.now()) =
+    matches.filter { isUpcomingFootballMatch(it, now) }
+        .minWithOrNull(compareBy<FootballMatch> { footballMatchOrder(it) }.thenBy(FootballMatch::priority))
+
+internal fun selectPreviousFootballMatch(matches: List<FootballMatch>, now: Instant = Instant.now()) =
+    matches.filter {
+        val status = it.status.trim().lowercase(Locale.ROOT)
+        val finished = status in setOf("ft", "aet", "pen", "finished", "match finished", "final") ||
+            (status.isBlank() && it.homeScore != null && it.awayScore != null)
+        finished && footballMatchOrder(it)?.let { kickoff -> !kickoff.isAfter(now) } == true
+    }.maxWithOrNull(compareBy<FootballMatch> { footballMatchOrder(it) }.thenBy { -it.priority })
 
 internal fun isLiveFootballStatus(status: String): Boolean {
     val value = status.trim().lowercase(Locale.ROOT)
-    return value.isNotBlank() && value !in setOf("not started", "ns", "match finished", "finished", "ft", "postponed", "cancelled", "canceled")
+    // Soccer states: https://www.thesportsdb.com/docs_api_data_guide.php
+    val minute = Regex("(\\d{1,3})(?:\\+\\d{1,2})?['′]?").matchEntire(value)?.groupValues?.get(1)?.toIntOrNull()
+    return value in setOf("1h", "ht", "2h", "et", "bt", "p", "live", "in progress", "first half", "second half", "half time", "halftime", "extra time") ||
+        minute in 1..150
 }
+
+internal fun isLiveFootballMatch(match: FootballMatch, now: Instant): Boolean = isLiveFootballStatus(match.status) &&
+    (match.kickoff?.let { java.time.Duration.between(it, now).seconds in 0..(4 * 60 * 60) }
+        ?: (runCatching { LocalDate.parse(match.date) }.getOrNull() == now.atOffset(ZoneOffset.UTC).toLocalDate()))
 
 object CatalogRepository {
     private val personCredits = boundedCache<Int, List<MediaItem>>(24)
@@ -234,7 +302,10 @@ object CatalogRepository {
         }.getOrElse { fallback() }.also { if (!it.isDemo) { cachedCatalog = today to it; cachedAt = System.nanoTime() } }
     }
 
-    suspend fun details(item: MediaItem): MediaDetails {
+    suspend fun details(item: MediaItem): MediaDetails = detailsOrNull(item) ?: fallbackDetails()
+
+    /** Null means the request failed and is worth retrying; it is never cached. */
+    suspend fun detailsOrNull(item: MediaItem): MediaDetails? {
         val key = "${item.mediaType}-${item.id}"
         mediaDetails[key]?.let { return it }
         return withContext(Dispatchers.Default) {
@@ -286,7 +357,7 @@ object CatalogRepository {
                 }.orEmpty()
             }.distinctBy { it.name }.take(4)
             MediaDetails(
-                runtime = if (runtimeMinutes > 0) "${runtimeMinutes} min" else "",
+                runtime = formatRuntime(runtimeMinutes),
                 genres = genres,
                 cast = cast,
                 similar = json.optJSONObject("recommendations")?.optJSONArray("results")
@@ -301,7 +372,7 @@ object CatalogRepository {
                     }
                 }.orEmpty(),
             )
-        }.onSuccess { mediaDetails[key] = it }.getOrElse { fallbackDetails() }
+        }.onSuccess { mediaDetails[key] = it }.getOrNull()
         }
     }
 
@@ -390,12 +461,23 @@ object CatalogRepository {
 
 }
 
+private var httpCacheDirectory: java.io.File? = null
+
+/** Called once from Application before any request; tests run without a disk cache. */
+internal fun initHttpCache(cacheDirectory: java.io.File) {
+    httpCacheDirectory = cacheDirectory
+}
+
 // Reuse connections and cancel the socket when a search or screen is abandoned.
-private val apiClient = OkHttpClient.Builder()
-    .connectTimeout(5, TimeUnit.SECONDS)
-    .readTimeout(5, TimeUnit.SECONDS)
-    .callTimeout(10, TimeUnit.SECONDS)
-    .build()
+// TMDB responses are public for about six hours, so a relaunch serves Home from disk.
+internal val apiClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
+        .apply { httpCacheDirectory?.let { cache(Cache(it.resolve("http"), 10L * 1024 * 1024)) } }
+        .build()
+}
 
 internal suspend fun readJson(url: String, token: String? = null): JSONObject =
     suspendCancellableCoroutine { continuation ->
@@ -460,7 +542,9 @@ internal fun catalogPath(spec: CatalogSpec, today: LocalDate): String = if (spec
 
 internal fun catalogPaths(spec: CatalogSpec, today: LocalDate): List<String> {
     val path = catalogPath(spec, today)
-    return (1..3).map { "$path${if ('?' in path) '&' else '?'}page=$it" }
+    // Walk the 360 highest-rated films over six days instead of repeating pages 1-3.
+    val first = if (spec.title == "Top rated movies") 1 + Math.floorMod(today.toEpochDay(), 6L).toInt() * 3 else 1
+    return (first until first + 3).map { "$path${if ('?' in path) '&' else '?'}page=$it" }
 }
 
 // Rank first, then arrange the shortlist chronologically. Upcoming films need no votes yet.
@@ -477,7 +561,9 @@ internal fun filterSectionItems(title: String, items: List<MediaItem>, today: Lo
         val date = runCatching { LocalDate.parse(item.releaseDate) }.getOrNull()
         when (title) {
             "Coming soon" -> item.mediaType == "movie" && date != null && date.isAfter(today) && !date.isAfter(today.plusMonths(12))
-            "Now in cinemas" -> item.mediaType == "movie" && date != null && !date.isAfter(today)
+            // TMDB's now-playing feed includes anniversary re-releases of decades-old films.
+            "Now in cinemas" -> item.mediaType == "movie" && date != null && !date.isAfter(today) &&
+                !date.isBefore(today.minusDays(100))
             "Top rated movies", "Popular movies" -> item.mediaType == "movie" && date != null && !date.isAfter(today)
             "Popular series" -> item.mediaType == "tv"
             "Popular animation" -> item.mediaType == "movie" && 16 in item.genreIds
@@ -488,5 +574,13 @@ internal fun filterSectionItems(title: String, items: List<MediaItem>, today: Lo
     }
 
 internal fun mediaRating(item: MediaItem): String =
-    if (item.voteCount <= 0 || !item.score.isFinite() || item.score <= 0.0) "Not rated"
+    // A handful of early votes produces misleading 9+ averages.
+    if (item.voteCount < 20 || !item.score.isFinite() || item.score <= 0.0) "Not rated"
     else "★ ${"%.1f".format(Locale.US, item.score)}"
+
+internal fun formatRuntime(minutes: Int): String = when {
+    minutes <= 0 -> ""
+    minutes < 60 -> "$minutes min"
+    minutes % 60 == 0 -> "${minutes / 60} h"
+    else -> "${minutes / 60} h ${minutes % 60} min"
+}

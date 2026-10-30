@@ -214,7 +214,7 @@ class CatalogRepositoryTest {
         assertTrue(!isLiveFootballStatus("FT"))
         val premierLeague = scheduled.copy(date = "2026-08-28", priority = 2)
         val worldCup = scheduled.copy(date = "2030-06-08", priority = 0)
-        assertEquals(premierLeague, selectNextFootballMatch(listOf(worldCup, premierLeague)))
+        assertEquals(premierLeague, selectNextFootballMatch(listOf(worldCup, premierLeague), java.time.Instant.parse("2026-08-24T00:00:00Z")))
         assertEquals("World Cup · mâine", footballHintText(FootballHint("WORLD CUP", 1), true))
         assertEquals("CHAMPIONS LEAGUE", localizeUi("CHAMPIONS LEAGUE", true))
     }

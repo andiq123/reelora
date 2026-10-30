@@ -36,11 +36,20 @@ class WidgetPreviewActivity : ComponentActivity() {
         val previous = FootballMatch("Leeds United", "Newcastle United", "2026-09-14", "20:00", 4, 1, competition = "PREMIER LEAGUE", homeCountry = "England", awayCountry = "England")
         val snapshot = when (scenario) {
             "loading", "offline" -> null
+            "missing", "stale-live" -> FootballSnapshot(
+                org.json.JSONObject("""{"events":[{
+                    "strHomeTeam":"Arsenal","strAwayTeam":"Everton","strStatus":"1H","strProgress":null,
+                    "dateEventLocal":null,"strTimeLocal":null,"dateEvent":null,"strTime":null,
+                    "intHomeScore":1,"intAwayScore":0,"strHomeTeamCountry":"England","strAwayTeamCountry":"England"
+                }]}""").footballMatches("PREMIER LEAGUE").single(),
+                next.copy(home = "Shakhtar Donetsk", away = "Sporting CP", homeCountry = "Ukraine", awayCountry = "Portugal",
+                    competition = "CHAMPIONS LEAGUE", kickoff = java.time.Instant.parse("2026-11-03T17:45:00Z")), null,
+            )
             "long" -> FootballSnapshot(null, next.copy(home = "Borussia Mönchengladbach", away = "Wolverhampton Wanderers", homeCountry = "Germany"), previous)
             "live" -> FootballSnapshot(next.copy(home = "Barcelona", away = "Real Madrid", homeScore = 2, awayScore = 1, status = "67′", competition = "CHAMPIONS LEAGUE", homeCountry = "Spain", awayCountry = "Spain"), next, previous)
             else -> FootballSnapshot(null, next, previous, FootballHint("CHAMPIONS LEAGUE", 3))
         }
-        val state = when (scenario) { "offline", "stale" -> WeatherLoadState.Error; "loading" -> WeatherLoadState.Loading; else -> WeatherLoadState.Ready }
+        val state = when (scenario) { "offline", "stale", "stale-live" -> WeatherLoadState.Error; "loading" -> WeatherLoadState.Loading; else -> WeatherLoadState.Ready }
         val weather = when (scenario) {
             "loading", "offline" -> null
             "night" -> WeatherNow(18, 0, false)

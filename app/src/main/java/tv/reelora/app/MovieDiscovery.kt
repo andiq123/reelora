@@ -1,6 +1,8 @@
 package tv.reelora.app
 
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
+import kotlin.random.Random
 
 private fun completeMovieMetadata(item: MediaItem): Boolean =
     (!item.posterUrl.isNullOrBlank() || !item.backdropUrl.isNullOrBlank()) &&
@@ -13,7 +15,10 @@ internal fun curatedSectionItems(title: String, items: List<MediaItem>, today: L
     return candidates.filter { item ->
         val date = runCatching { LocalDate.parse(item.releaseDate) }.getOrNull()
         val released = date != null && !date.isAfter(today)
-        val credible = item.score.isFinite() && item.score >= 6.0 && item.voteCount >= 20
+        // Older titles need more votes before their average means anything.
+        val age = date?.let { ChronoUnit.DAYS.between(it, today) } ?: Long.MAX_VALUE
+        val minimumVotes = when { age <= 90 -> 20; age <= 730 -> 100; else -> 300 }
+        val credible = item.score.isFinite() && item.score >= 6.5 && item.voteCount >= minimumVotes
         val newRelease = released && date != null && !date.isBefore(today.minusDays(45)) &&
             item.voteCount < 20 && item.popularity.isFinite() && item.popularity > 0
         released && when (title) {
@@ -21,6 +26,9 @@ internal fun curatedSectionItems(title: String, items: List<MediaItem>, today: L
             "Popular series" -> credible && item.genreIds.none { it == 10763 || it == 10764 || it == 10766 || it == 10767 }
             else -> item.mediaType == "movie" && (credible || newRelease)
         }
+    }.let { curated ->
+        // The top-rated canon barely changes; a daily order keeps Home from looking identical.
+        if (title == "Top rated movies") curated.shuffled(Random(today.toEpochDay())) else curated
     }.take(40)
 }
 

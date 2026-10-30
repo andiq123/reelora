@@ -145,7 +145,13 @@ internal class AppUpdater(private val activity: ComponentActivity) {
                 }
                 when (state) {
                     DownloadManager.STATUS_SUCCESSFUL -> {
-                        val newer = withContext(Dispatchers.IO) { validateApk() }
+                        // Hashing ~50 MB on every Home resume is noticeable on Fire TV; re-verify only
+                        // when the file changed. The installer still enforces the signing key.
+                        val newer = withContext(Dispatchers.IO) {
+                            val fingerprint = "${apk.length()}:${apk.lastModified()}"
+                            preferences.getString("verified", null) == fingerprint ||
+                                validateApk().also { if (it) preferences.edit().putString("verified", fingerprint).apply() }
+                        }
                         if (!newer) {
                             withContext(Dispatchers.IO) { downloads.remove(id); apk.delete() }
                             preferences.edit().clear().apply()

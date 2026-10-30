@@ -105,4 +105,24 @@ class MovieDiscoveryTest {
         assertEquals(8, sections.single { it.title == "Popular movies" }.items.size)
         assertEquals(sections, launcherMovieSections(catalog))
     }
+
+    @Test fun cinemasExcludeReReleasesAndOldTitlesNeedMoreVotes() {
+        val fresh = movie(1, "2026-09-01")
+        val reRelease = movie(2, "2019-04-24").copy(voteCount = 30000)
+        assertEquals(listOf(fresh), filterSectionItems("Now in cinemas", listOf(fresh, reRelease), today))
+        val thinOldClassic = movie(3, "2010-01-01").copy(voteCount = 120, score = 9.1)
+        val provenOldClassic = thinOldClassic.copy(id = 4, voteCount = 5000)
+        assertEquals(listOf(provenOldClassic), curatedSectionItems("Popular movies", listOf(thinOldClassic, provenOldClassic), today))
+        assertEquals("Not rated", mediaRating(movie(5).copy(score = 9.1, voteCount = 12)))
+    }
+
+    @Test fun topRatedRotatesDailyButIsStableWithinADay() {
+        val spec = CatalogRepository.specs.single { it.title == "Top rated movies" }
+        val week = (0L until 6L).map { catalogPaths(spec, today.plusDays(it)).first() }
+        assertEquals(6, week.distinct().size)
+        val classics = (1..30).map { movie(it, "2000-01-01").copy(voteCount = 5000) }
+        val day = curatedSectionItems("Top rated movies", classics, today)
+        assertEquals(day, curatedSectionItems("Top rated movies", classics, today))
+        assertNotEquals(day, curatedSectionItems("Top rated movies", classics, today.plusDays(1)))
+    }
 }

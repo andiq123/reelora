@@ -1,5 +1,6 @@
 package tv.reelora.app
 
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
@@ -25,17 +26,21 @@ internal val ControlShape = RoundedCornerShape(22.dp)
 internal val ActionShape = RoundedCornerShape(percent = 50)
 internal val DockShape = RoundedCornerShape(32.dp)
 internal val AppTileShape = RoundedCornerShape(18.dp)
-internal val AppTileWidth = 128.dp
-internal val AppTileHeight = 76.dp
+// 16:9, matching Android TV banners; about five apps fit across like tvOS Home.
+internal val AppTileWidth = 148.dp
+internal val AppTileHeight = 84.dp
 internal val Gap = 12.dp
 internal val GapLarge = 24.dp
 internal val DialogPadding = 32.dp
 
 internal object TvMotion {
-    const val BrowseMillis = 360
-    const val EnterMillis = 240
+    // Unhurried, decelerating motion: movement starts promptly and settles softly.
+    val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    const val BrowseMillis = 480
+    const val HeroTextMillis = 480
+    const val EnterMillis = 300
     const val InsertMillis = 180
     const val RemoveMillis = 140
-    const val ArtworkMillis = 700
+    const val ArtworkMillis = 900
     val EnterDistance = 10.dp
 }

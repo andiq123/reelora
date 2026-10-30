@@ -23,7 +23,7 @@ private val RomanianUi = mapOf(
     "Update could not be verified · try again" to "Actualizarea nu poate fi instalată · verifică conexiunea și versiunea",
     "Discover" to "Descoperă", "Explore" to "Explorează", "YOUR APPS" to "APLICAȚIILE TALE",
     "Your apps, ready" to "Aplicațiile tale sunt gata",
-    "Football" to "Fotbal", "Upcoming" to "Urmează", "Finished" to "Încheiat", "Previous" to "Anterior", "Live" to "În direct",
+    "Football" to "Fotbal", "Upcoming" to "Urmează", "Finished" to "Încheiat", "Previous" to "Anterior", "Live" to "În direct", "Last known" to "Ultima actualizare",
     "Settings" to "Setări", "Waiting for internet" to "Așteptăm conexiunea", "Updating weather" to "Actualizăm vremea", "Loading weather" to "Se încarcă vremea",
     "Clear sky" to "Cer senin", "Clear night" to "Noapte senină", "Partly cloudy" to "Parțial noros", "Cloudy" to "Noros", "Fog" to "Ceață", "Rain" to "Ploaie", "Snow" to "Ninsoare", "Thunderstorm" to "Furtună", "Weather unavailable" to "Vreme indisponibilă", "A quiet home for apps and discovery" to "Un spațiu calm pentru aplicații și descoperire",
     "APP SHELF" to "APLICAȚII", "Find and manage Home apps" to "Găsește și organizează aplicațiile",
@@ -70,6 +70,7 @@ private val RomanianUi = mapOf(
     "NO STREAMING LISTED" to "FĂRĂ STREAMING LISTAT", "Coming soon" to "În curând", "Now in cinemas" to "Acum în cinematografe",
     "Trending this week" to "În tendințe săptămâna aceasta", "Top rated movies" to "Filme apreciate",
     "Popular series" to "Seriale populare", "Popular animation" to "Animații populare",
+    "via JustWatch" to "prin JustWatch",
     "Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo" to "Filme prin TMDB · Disponibilitate prin JustWatch · Vreme prin Open-Meteo",
 )
 

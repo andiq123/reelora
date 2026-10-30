@@ -233,9 +233,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        inputEvents.trySend(Unit)
-        return super.onKeyDown(keyCode, event)
+    // Compose consumes D-pad keys before onKeyDown, so idle timing observes dispatch instead.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) inputEvents.trySend(Unit)
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1025,7 +1026,13 @@ private fun Home(
     val showCatalog by remember { derivedStateOf { catalogOpen || browseReveal.value > 0f } }
     LaunchedEffect(catalogOpen) {
         browseReveal.animateTo(if (catalogOpen) 1f else 0f,
-            tween(TvMotion.BrowseMillis, easing = FastOutSlowInEasing))
+            tween(TvMotion.BrowseMillis, easing = TvMotion.Emphasized))
+    }
+    val rowPosition = remember { Animatable(0f) }
+    var settledRow by remember { mutableStateOf(0) }
+    LaunchedEffect(displayedRow) {
+        rowPosition.animateTo(displayedRow.toFloat(), tween(TvMotion.BrowseMillis, easing = TvMotion.Emphasized))
+        settledRow = displayedRow
     }
     val scope = rememberCoroutineScope()
     val heroFocus = remember { FocusRequester() }
@@ -1115,6 +1122,19 @@ private fun Home(
             heroPreferences.edit().putString("lastFeatured", mediaKey(it)).apply()
         }
     }
+    // The backdrop follows the card that keeps focus, debounced so fast scrolling decodes nothing.
+    // Leaving the shelves keeps that title as the hero, so Explore opens what was being looked at.
+    var browsed by remember { mutableStateOf<MediaItem?>(null) }
+    LaunchedEffect(catalogOpen, focusedRow, movieIndex, sections) {
+        if (!catalogOpen) {
+            browsed?.let { hero = it }
+            browsed = null
+            return@LaunchedEffect
+        }
+        delay(450)
+        sections.getOrNull(focusedRow)?.items?.getOrNull(movieIndex)
+            ?.takeIf { !it.backdropUrl.isNullOrBlank() }?.let { browsed = it }
+    }
     var initiallyFocused by remember { mutableStateOf(false) }
     LaunchedEffect(appsReady) {
         if (!appsReady || initiallyFocused) return@LaunchedEffect
@@ -1156,7 +1176,7 @@ private fun Home(
             }.focusRequester(navigationFocus).focusProperties { canFocus = navigating }.focusable(),
         ) {
             LauncherStage(
-                hero,
+                browsed ?: hero,
                 weather,
                 weatherState,
                 use24HourClock,
@@ -1201,32 +1221,33 @@ private fun Home(
                         translationY = (1f - browseReveal.value) * (shelfHeight + 24.dp).toPx()
                         alpha = chromeReveal.value
                     }.clipToBounds().padding(vertical = 8.dp)) {
-                    // A refreshed catalog must dispose transitions that refer to its old indices.
-                    key(sections) { AnimatedContent(
-                        targetState = displayedRow.coerceIn(sections.indices),
-                        modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds(),
-                        transitionSpec = {
-                            val direction = if (targetState > initialState) 1 else -1
-                            slideInVertically(tween(TvMotion.BrowseMillis, easing = FastOutSlowInEasing)) { it * direction } togetherWith
-                                slideOutVertically(tween(TvMotion.BrowseMillis, easing = FastOutSlowInEasing)) { -it * direction }
-                        },
-                        label = "category shelf",
-                    ) { index ->
-                        MediaRow(
-                            sections[index], onSelect, movieRowState[index], movieRowFocus[index], focusLift,
-                            canFocus = catalogOpen && focusedRow == index,
-                            positionLabel = "${index + 1} / ${sections.size}",
-                            onItemFocused = { itemIndex ->
-                                if (!navigating) {
-                                    focusedRow = index
-                                    movieIndex = itemIndex
-                                }
-                            },
-                        )
+                    // Neighbouring shelves stay composed and measured off-screen, so a remote press only
+                    // moves layers that already exist; the next neighbour composes after the slide settles.
+                    // A refreshed catalog must dispose rows that refer to its old indices.
+                    key(sections) { Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+                        val shown = displayedRow.coerceIn(sections.indices)
+                        val first = minOf(settledRow - 1, shown).coerceAtLeast(0)
+                        val last = maxOf(settledRow + 1, shown).coerceAtMost(sections.lastIndex)
+                        for (index in first..last) key(index) {
+                            Box(Modifier.fillMaxSize().graphicsLayer {
+                                val distance = index - rowPosition.value
+                                translationY = distance * size.height
+                                // Fully off-screen rows skip drawing but keep their images warm.
+                                alpha = if (kotlin.math.abs(distance) >= 1f) 0f else 1f
+                            }) {
+                                MediaRow(
+                                    sections[index], onSelect, movieRowState[index], movieRowFocus[index], focusLift,
+                                    canFocus = catalogOpen && focusedRow == index,
+                                    onItemFocused = { itemIndex ->
+                                        if (!navigating) {
+                                            focusedRow = index
+                                            movieIndex = itemIndex
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     } }
-                    Text(tr("Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo"),
-                        color = SecondaryText, fontSize = 11.sp, lineHeight = 16.sp,
-                        modifier = Modifier.padding(horizontal = 48.dp))
                 }
             }
         }
@@ -1351,6 +1372,8 @@ private val FootballTextStyle = androidx.compose.ui.text.TextStyle(
 @Composable
 internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState, modifier: Modifier = Modifier) {
     val softWhite = Color(0xFFE9E8E3)
+    val zone = rememberSystemTime().zone
+    val online = LocalInternet.current
     Column(modifier.widthIn(max = 490.dp).fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(androidx.compose.ui.res.painterResource(R.drawable.football_ball), contentDescription = null,
@@ -1369,21 +1392,23 @@ internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (shown.live != null) {
-                        FootballMatchSummary("Live", shown.live, live = true)
+                        val current = online && state == WeatherLoadState.Ready
+                        FootballMatchSummary(if (current) "Live" else "Last known", shown.live,
+                            live = current, zone = zone)
                         if (shown.next != null) {
                             FootballGroupDivider()
-                            FootballMatchSummary("Upcoming", shown.next)
+                            FootballMatchSummary("Upcoming", shown.next, zone = zone)
                         }
                     } else {
-                        if (shown.next != null) FootballMatchSummary("Upcoming", shown.next)
+                        if (shown.next != null) FootballMatchSummary("Upcoming", shown.next, zone = zone)
                         if (shown.previous != null) {
                             if (shown.next != null) FootballGroupDivider()
-                            FootballMatchSummary("Previous", shown.previous)
+                            FootballMatchSummary("Previous", shown.previous, zone = zone)
                         }
                     }
-                    if (state == WeatherLoadState.Error || shown.hint != null) {
+                    if (!online || state == WeatherLoadState.Error || shown.hint != null) {
                         Text(
-                            if (state == WeatherLoadState.Error) tr("Fixtures unavailable · retrying") else footballHintText(shown.hint, LocalRomanian.current),
+                            if (!online) tr("Waiting for internet") else if (state == WeatherLoadState.Error) tr("Fixtures unavailable · retrying") else footballHintText(shown.hint, LocalRomanian.current),
                             color = softWhite.copy(alpha = .72f), fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, style = FootballTextStyle,
                         )
                     }
@@ -1401,7 +1426,7 @@ private fun FootballGroupDivider() {
 }
 
 @Composable
-private fun FootballMatchSummary(label: String, match: FootballMatch, live: Boolean = false) {
+private fun FootballMatchSummary(label: String, match: FootballMatch, live: Boolean = false, zone: java.time.ZoneId) {
     val accent = if (live) Color(0xFFA8E4C3) else Color(0xFFE9E8E3)
     val secondary = Color(0xFFD1D5D6)
     val statusColor = if (live) accent else if (label == "Upcoming") Color(0xFFB6D6F4) else Color(0xFFD0C6E4)
@@ -1436,7 +1461,8 @@ private fun FootballMatchSummary(label: String, match: FootballMatch, live: Bool
                 fontWeight = FontWeight.SemiBold, style = FootballTextStyle)
             FootballTeam(match.away, match.awayId, match.awayCountry, Modifier.weight(1f, fill = false))
         }
-        Text(footballSchedule(match, locale), color = secondary.copy(alpha = .85f), fontSize = 12.sp,
+        val schedule = footballSchedule(match, locale, zone)
+        if (schedule.isNotBlank()) Text(schedule, color = secondary.copy(alpha = .85f), fontSize = 12.sp,
             lineHeight = 16.sp, maxLines = 2, style = FootballTextStyle)
     }
 }
@@ -1452,7 +1478,12 @@ private fun FootballTeam(name: String, id: String, knownCountry: String, modifie
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         // Reserve the tiny flag slot so a network result never shifts the team name.
         Box(Modifier.width(with(androidx.compose.ui.platform.LocalDensity.current) { 20.sp.toDp() }), contentAlignment = Alignment.Center) {
-            if (flag != null) Text(flag, fontSize = 17.sp, maxLines = 1,
+            // Fire TV's emoji font does not reliably render England's subdivision flag.
+            if (country.equals("England", ignoreCase = true)) Image(
+                androidx.compose.ui.res.painterResource(R.drawable.flag_england), contentDescription = country,
+                modifier = Modifier.fillMaxWidth().height(12.dp),
+            )
+            else if (flag != null) Text(flag, fontSize = 17.sp, maxLines = 1,
                 modifier = Modifier.semantics { contentDescription = country })
         }
         Text(name, color = Color.White, fontSize = 22.sp, lineHeight = 26.sp,
@@ -1461,12 +1492,16 @@ private fun FootballTeam(name: String, id: String, knownCountry: String, modifie
 }
 
 internal fun footballScore(match: FootballMatch) =
-    if (match.homeScore != null && match.awayScore != null) "${match.homeScore}–${match.awayScore}" else "vs"
+    if (match.homeScore != null && match.awayScore != null &&
+        match.status.trim().lowercase(java.util.Locale.ROOT) !in setOf("ns", "not started", "tbd", "time to be defined")) "${match.homeScore}–${match.awayScore}" else "vs"
 
-internal fun footballSchedule(match: FootballMatch, locale: java.util.Locale = java.util.Locale.ENGLISH): String {
-    val date = runCatching { LocalDate.parse(match.date) }.getOrNull()
-        ?.format(DateTimeFormatter.ofPattern("EEE, d MMM", locale)) ?: match.date
-    return listOf(date, match.time).filter(String::isNotBlank).joinToString(" · ")
+internal fun footballSchedule(match: FootballMatch, locale: java.util.Locale = java.util.Locale.ENGLISH,
+    zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+    val kickoff = match.kickoff?.atZone(zone)
+    val date = footballMatchDay(match, zone)?.format(DateTimeFormatter.ofPattern("EEE, d MMM", locale)).orEmpty()
+    val time = kickoff?.toLocalTime() ?: runCatching { LocalTime.parse(match.time) }.getOrNull()
+    return listOf(date, time?.format(DateTimeFormatter.ofPattern("HH:mm")).orEmpty())
+        .filter(String::isNotBlank).joinToString(" · ")
 }
 
 internal fun footballHintText(hint: FootballHint?, romanian: Boolean): String {
@@ -1510,8 +1545,6 @@ private fun AppDock(
         if (showLabels || movingAppKey != null) 8.dp + 16.sp.toDp() else 0.dp
     }
     val reveal = remember { Animatable(if (appsReady) 1f else 0f) }
-    val dockSheen = remember { Brush.verticalGradient(listOf(Color.White.copy(alpha = .16f), Color.White.copy(alpha = .025f))) }
-    val dockEdge = remember { Brush.verticalGradient(listOf(Color.White.copy(alpha = .32f), Color.White.copy(alpha = .06f))) }
     LaunchedEffect(appsReady) {
         if (appsReady && reveal.value < 1f) reveal.animateTo(1f, tween(TvMotion.EnterMillis, easing = LinearOutSlowInEasing))
     }
@@ -1528,16 +1561,10 @@ private fun AppDock(
     }
     Box(
         modifier.fillMaxWidth().height(AppTileHeight + 32.dp + labelSpace)
-            .padding(horizontal = 48.dp)
-            .clip(DockShape),
     ) {
-        // Retain the static glass; changing focus and scrolling stay outside its bounded layer.
-        ArtworkBackdrop {
-            Box(Modifier.fillMaxSize().background(DockSurface).background(dockSheen)
-                .border(1.dp, dockEdge, DockShape))
-        }
+        // Like tvOS Home, tiles float directly over the artwork; no glass slab to composite each frame.
         if (!appsReady) {
-            Row(Modifier.padding(horizontal = 22.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(Modifier.padding(horizontal = 48.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 repeat(5) {
                     Box(Modifier.size(AppTileWidth, AppTileHeight).background(Color.White.copy(alpha = .05f), AppTileShape))
                 }
@@ -1547,7 +1574,8 @@ private fun AppDock(
         CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
         LazyRow(
             state = listState,
-            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp),
+            // Edge-to-edge like the movie rows, starting on the same 48 dp line.
+            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 // One layer for the shelf: drawing-only motion, no per-frame layout or per-app stagger.
@@ -1768,6 +1796,7 @@ private fun TvDialog(
     alignment: Alignment = Alignment.Center,
     surface: Brush? = DialogSurface,
     deferFocus: Boolean = false,
+    fullBleed: Boolean = false,
     content: @Composable androidx.compose.foundation.layout.BoxScope.(() -> Unit) -> Unit,
 ) {
     val confirmPress = remember { RemotePressGate() }
@@ -1814,8 +1843,9 @@ private fun TvDialog(
                     scaleY = scaleX
                     translationX = if (alignment == Alignment.CenterEnd) (1f - reveal.value) * 12.dp.toPx() else 0f
                     translationY = if (alignment == Alignment.CenterEnd) 0f else (1f - reveal.value) * TvMotion.EnterDistance.toPx()
-                }.clip(DialogShape).then(if (surface != null) Modifier.background(surface) else Modifier)
-                    .border(1.dp, Color.White.copy(alpha = .18f), DialogShape),
+                }.then(if (fullBleed) Modifier else Modifier.clip(DialogShape))
+                    .then(if (surface != null) Modifier.background(surface) else Modifier)
+                    .then(if (fullBleed) Modifier else Modifier.border(1.dp, Color.White.copy(alpha = .18f), DialogShape)),
             ) {
                 CompositionLocalProvider(LocalDialogReady provides ready) { content(close) }
             }
@@ -2170,6 +2200,9 @@ private fun SettingsDialog(
                             SettingsRow("Device settings", Modifier.focusRequester(contentFocus), subtitle = "Network, display, sound and Android system", onClick = onSystemSettings)
                             SettingsRow("Default home", onClick = onHomeSettings)
                             SettingsRow("Language", value = if (romanian) "Română" else "English", navigation = false) { onLanguage(!romanian) }
+                            Text(tr("Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo"),
+                                color = SecondaryText, fontSize = 11.sp, lineHeight = 16.sp,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
                         }
                     }
                 }
@@ -2340,7 +2373,7 @@ private fun LauncherStage(
         if (displayed == item) return@LaunchedEffect
         reveal.snapTo(0f)
         displayed = item
-        reveal.animateTo(1f, tween(360, easing = LinearOutSlowInEasing))
+        reveal.animateTo(1f, tween(TvMotion.HeroTextMillis, easing = TvMotion.Emphasized))
     }
     Box(
         modifier
@@ -2416,22 +2449,41 @@ private fun LauncherStage(
 }
 
 @Composable
+private fun rememberSystemTime(): java.time.ZonedDateTime {
+    var time by remember { mutableStateOf(java.time.ZonedDateTime.now()) }
+    val context = LocalContext.current
+    val isForeground = LocalForeground.current
+    DisposableEffect(context, isForeground) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                time = java.time.ZonedDateTime.now()
+            }
+        }
+        if (isForeground) {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_TIME_TICK)
+                addAction(Intent.ACTION_TIME_CHANGED)
+                addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            }
+            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else context.registerReceiver(receiver, filter)
+            time = java.time.ZonedDateTime.now()
+        }
+        onDispose {
+            if (isForeground) context.unregisterReceiver(receiver)
+        }
+    }
+    return time
+}
+
+@Composable
 internal fun HomeStatus(
     weather: WeatherNow?,
     weatherState: WeatherLoadState,
     use24HourClock: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var time by remember { mutableStateOf(LocalTime.now()) }
-    val isForeground = LocalForeground.current
-    LaunchedEffect(isForeground) {
-        if (!isForeground) return@LaunchedEffect
-        time = LocalTime.now()
-        while (true) {
-            delay(60_000L - System.currentTimeMillis() % 60_000L)
-            time = LocalTime.now()
-        }
-    }
+    val time = rememberSystemTime().toLocalTime()
     Column(modifier, horizontalAlignment = Alignment.End) {
         HomeClock(time, use24HourClock)
         Spacer(Modifier.height(6.dp))
@@ -2585,6 +2637,7 @@ private fun PosterCard(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun DetailsDialog(
     item: MediaItem,
     similar: List<MediaItem>,
@@ -2599,15 +2652,21 @@ private fun DetailsDialog(
     val actorRowRequester = remember { FocusRequester() }
     val similarRowRequester = remember { FocusRequester() }
     var details by remember(mediaKey(item)) { mutableStateOf<MediaDetails?>(null) }
+    var detailsLoaded by remember(mediaKey(item)) { mutableStateOf(false) }
+    val online = LocalInternet.current
     var selectedActor by remember(mediaKey(item)) { mutableStateOf<CastMember?>(null) }
     var actorTitles by remember(mediaKey(item), selectedActor?.id) { mutableStateOf<List<MediaItem>?>(null) }
     var actorLoading by remember(mediaKey(item)) { mutableStateOf(false) }
     val context = LocalContext.current
     val artwork = remember(context, item.backdropUrl) { item.backdropUrl?.let { ImageRequest.Builder(context).data(it).crossfade(120).build() } }
     val moreLike = details?.similar?.ifEmpty { similar } ?: similar
-    val restoreTop: () -> Unit = { if (listState.firstVisibleItemIndex != 0) scope.launch { listState.animateScrollToItem(0) } }
-    TvDialog(onDismiss, Modifier.fillMaxWidth(.9f).fillMaxHeight(.92f), surface = null) { close ->
+    val restoreTop: () -> Unit = {
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) scope.launch { listState.animateScrollToItem(0) }
+    }
+    var backFocused by remember(mediaKey(item)) { mutableStateOf(false) }
+    TvDialog(onDismiss, Modifier.fillMaxSize(), surface = null, fullBleed = true) { close ->
         val ready = LocalDialogReady.current
+        val trailer = details?.trailer
         LaunchedEffect(ready, mediaKey(item)) {
             if (ready) {
                 listState.scrollToItem(0)
@@ -2615,7 +2674,14 @@ private fun DetailsDialog(
                 requester.requestFocus()
             }
         }
-         Box(Modifier.fillMaxSize()) {
+        // A trailer that arrives after opening becomes the primary action, unless focus moved on.
+        LaunchedEffect(trailer) {
+            if (ready && trailer != null && backFocused) {
+                withFrameNanos { }
+                requester.requestFocus()
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
           ArtworkBackdrop {
            Box(Modifier.fillMaxSize().background(Background))
            artwork?.let {
@@ -2626,66 +2692,77 @@ private fun DetailsDialog(
                   modifier = Modifier.fillMaxSize(),
               )
            }
+           // Darken only where text sits; the rest of the artwork stays vivid.
+           Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
+               0f to Background.copy(alpha = .88f), .55f to Background.copy(alpha = .38f), 1f to Color.Transparent,
+           )))
            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-               listOf(Background.copy(alpha = .66f), Background.copy(alpha = .92f)),
+               0f to Color.Transparent, .42f to Color.Transparent, 1f to Background.copy(alpha = .95f),
            )))
           }
+          // Dims the artwork as the rows below scroll in; read during draw so scrolling never recomposes.
+          Box(Modifier.fillMaxSize().graphicsLayer {
+              alpha = if (listState.firstVisibleItemIndex > 0) 1f
+                  else (listState.firstVisibleItemScrollOffset / 360f).coerceIn(0f, 1f)
+          }.background(Background.copy(alpha = .8f)))
+          // TV's default spec pivots focus to a third of the screen, which pushed the title off-screen.
+          CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalBringIntoView) {
           LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 28.dp, top = 28.dp, end = 28.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = PaddingValues(bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-            item { Column {
-                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionButton(
-                        "Back",
-                        modifier = Modifier.focusRequester(requester),
-                        onFocused = restoreTop,
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        iconOnly = true,
-                        onClick = close,
-                    )
-                    details?.trailer?.let { trailer ->
-                        ActionButton("Play trailer", onFocused = restoreTop, icon = Icons.Default.PlayArrow, role = ActionRole.Primary) { onPlayTrailer(trailer) }
-                    }
-                    if (details == null) LoadingBlock(132.dp, 42.dp, 10.dp)
-                }
-                Spacer(Modifier.height(18.dp))
-                Row {
-                    Box(
-                        Modifier.width(136.dp).height(190.dp).clip(RoundedCornerShape(14.dp))
-                            .background(Brush.linearGradient(listOf(ControlSurface, Background)))
-                    ) {
-                        if (item.posterUrl != null) AsyncImage(artworkModel(item.posterUrl), item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        else Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(82.dp).align(Alignment.Center))
-                    }
-                    Spacer(Modifier.width(20.dp))
-                    Column(Modifier.weight(1f)) {
-                    Text(item.title, color = Color.White, fontSize = 38.sp, lineHeight = 44.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(8.dp))
+            item(key = "hero") {
+                Column(
+                    Modifier.fillParentMaxHeight(.86f).fillMaxWidth().padding(horizontal = 64.dp),
+                    verticalArrangement = Arrangement.Bottom,
+                ) {
+                    Text(item.title, Modifier.widthIn(max = 780.dp), color = Color.White, fontSize = 52.sp, lineHeight = 56.sp,
+                        letterSpacing = (-1.4).sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(10.dp))
                     val metadata = listOf(
                         item.year,
-                        item.mediaType.uppercase(),
+                        details?.genres.orEmpty(),
                         details?.runtime.orEmpty(),
                         tr(mediaRating(item)),
                     ).filter { it.isNotBlank() }.joinToString("  ·  ")
-                    Text(metadata, color = WarmAccent, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(details?.genres.orEmpty(), modifier = Modifier.heightIn(min = 18.dp), color = SecondaryText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(8.dp))
+                    Text(metadata, Modifier.heightIn(min = 20.dp), color = Color.White.copy(alpha = .78f), fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(14.dp))
+                    Text(item.overview, Modifier.widthIn(max = 660.dp), color = Color.White.copy(alpha = .86f),
+                        fontSize = 17.sp, lineHeight = 25.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(16.dp))
                     Row(Modifier.heightIn(min = 30.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // "Released" is implied by a rating; only upcoming or fresh dates earn a badge.
                         val release = releaseLabel(item.releaseDate)
-                        InfoBadge(release, if (release.startsWith("✓") || release.startsWith("●")) Color(0xFF66D69A) else WarmAccent)
-                        details?.availability?.let { AvailabilityBadge(it) }
+                        if (!release.startsWith("✓")) InfoBadge(release, if (release.startsWith("●")) Color(0xFF66D69A) else WarmAccent)
+                        details?.availability?.let {
+                            AvailabilityBadge(it)
+                            Text(tr("via JustWatch"), color = SecondaryText, fontSize = 11.sp)
+                        }
                     }
-                    Text(details?.availability?.let { tr("Availability by JustWatch · ${it.region}") }.orEmpty(), modifier = Modifier.heightIn(min = 16.dp), color = SecondaryText, fontSize = 12.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text(item.overview, color = Color.White.copy(alpha = .78f), fontSize = 16.sp, lineHeight = 22.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(22.dp))
+                    Row(Modifier.heightIn(min = 52.dp).focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        if (trailer != null) {
+                            ActionButton("Play trailer", Modifier.focusRequester(requester), onFocused = restoreTop,
+                                icon = Icons.Default.PlayArrow, role = ActionRole.Primary) { onPlayTrailer(trailer) }
+                        } else if (details == null) LoadingBlock(150.dp, 48.dp, 24.dp)
+                        ActionButton(
+                            "Back",
+                            modifier = (if (trailer == null) Modifier.focusRequester(requester) else Modifier)
+                                .onFocusChanged { backFocused = it.isFocused },
+                            onFocused = restoreTop,
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            iconOnly = true,
+                            onClick = close,
+                        )
                     }
                 }
-            } }
+            }
             item { Column {
-                Text(tr("Cast"), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr("Cast"), Modifier.padding(start = 64.dp), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 Box(Modifier.heightIn(min = with(LocalDensity.current) { 90.dp + 44.sp.toDp() })) { CastRow(
                     details?.cast,
@@ -2705,25 +2782,43 @@ private fun DetailsDialog(
             selectedActor?.let { actor ->
                 val titles = actorTitles
                 item(key = "actor-credits") { Column {
-                    Text(tr("${actor.name} · Movies & TV${if (actorLoading && titles != null) " · Updating…" else ""}"), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(tr("${actor.name} · Movies & TV${if (actorLoading && titles != null) " · Updating…" else ""}"), Modifier.padding(start = 64.dp), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(10.dp))
                     when {
                         titles == null -> LoadingPosterRow()
-                        titles.isEmpty() -> Text(tr("No other titles found"), color = SecondaryText, fontSize = 14.sp)
-                        else -> PosterStrip(titles, onSelect, firstModifier = Modifier.focusRequester(actorRowRequester))
+                        titles.isEmpty() -> Text(tr("No other titles found"), Modifier.padding(start = 64.dp), color = SecondaryText, fontSize = 14.sp)
+                        else -> PosterStrip(titles, onSelect, contentPadding = DetailsRowPadding, firstModifier = Modifier.focusRequester(actorRowRequester))
                     }
                 } }
             }
             item { Column {
-                Text(tr("More like this"), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr("More like this"), Modifier.padding(start = 64.dp), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
-                PosterStrip(moreLike, onSelect, firstModifier = Modifier.focusRequester(similarRowRequester))
+                PosterStrip(moreLike, onSelect, contentPadding = DetailsRowPadding, firstModifier = Modifier.focusRequester(similarRowRequester))
             } }
+          }
           }
          }
     }
-    LaunchedEffect(mediaKey(item), isForeground) {
-        if (isForeground && details == null) details = CatalogRepository.details(item)
+    LaunchedEffect(mediaKey(item), isForeground, online) {
+        if (!isForeground || detailsLoaded) return@LaunchedEffect
+        if (!online) {
+            if (details == null) details = MediaDetails("", "", emptyList(), emptyList(), null, null, emptyList())
+            return@LaunchedEffect
+        }
+        // A brief network blip must not leave the page without cast, trailer, or availability.
+        var wait = 3_000L
+        while (true) {
+            val loaded = CatalogRepository.detailsOrNull(item)
+            if (loaded != null) {
+                details = loaded
+                detailsLoaded = true
+                break
+            }
+            if (details == null) details = MediaDetails("", "", emptyList(), emptyList(), null, null, emptyList())
+            delay(wait)
+            wait = (wait * 2).coerceAtMost(60_000L)
+        }
     }
     LaunchedEffect(selectedActor?.id, isForeground) {
         if (!isForeground || actorTitles != null) return@LaunchedEffect
@@ -2735,6 +2830,20 @@ private fun DetailsDialog(
         }
     }
 }
+
+@OptIn(ExperimentalFoundationApi::class)
+private val MinimalBringIntoView = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val margin = 48f
+        return when {
+            offset >= 0f && offset + size <= containerSize -> 0f
+            offset < 0f || size > containerSize -> offset - margin
+            else -> offset + size - containerSize + margin
+        }.let { if (offset < 0f) minOf(it, 0f) else it }
+    }
+}
+
+private val DetailsRowPadding = PaddingValues(start = 58.dp, end = 64.dp, top = 8.dp, bottom = 8.dp)
 
 @Composable
 private fun AvailabilityBadge(availability: WatchAvailability) {
@@ -2783,12 +2892,12 @@ private fun CastRow(
         return
     }
     if (cast.isEmpty()) {
-        Text(tr("Cast information unavailable"), color = SecondaryText, fontSize = 14.sp, modifier = Modifier.height(98.dp))
+        Text(tr("Cast information unavailable"), color = SecondaryText, fontSize = 14.sp, modifier = Modifier.padding(start = 64.dp).height(98.dp))
         return
     }
     LazyRow(
-        contentPadding = PaddingValues(start = 6.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = DetailsRowPadding,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.focusGroup(),
     ) {
         items(cast, key = { "${it.id}-${it.name}" }, contentType = { "cast" }) { person ->
