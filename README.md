@@ -174,3 +174,11 @@ Settings keeps app-organization guidance in its visible header and uses the avai
 Clock hours/minutes and weather temperatures now change with a subtle 240 ms slide and fade. Colons and degree symbols stay still, tabular digits keep widths steady, and loading placeholders fade in place. Native motion respects the system animation scale and adds no continuous animation, polling, or dependency.
 
 Version 0.24.18 (74) delivers the completed patch as an available update to devices that installed an earlier 0.24.17 test build.
+
+## Apple TV-style Home in 0.25.0
+
+App tiles now float directly over the artwork at a larger 16:9 size, aligned with the movie rows and running to the screen edge. While browsing, the background follows the movie that keeps focus, and that movie becomes the featured title on return. Home drops the row counter and footer; data credits are in Settings → System. Movie details are full-screen, with the title, one metadata line, a three-line synopsis and actions anchored low-left, and cast and recommendations spanning the full width. Motion is slower and decelerating.
+
+Shelf changes keep the neighbouring rows composed and measured, so a remote press only slides existing rows. On a Fire TV Stick 4K Max, main-thread work per frame fell from about 50 ms to 12 ms (p90). TMDB responses are kept in a 10 MB HTTP cache; a relaunch within six hours loads Home without network traffic.
+
+Now in cinemas no longer includes decades-old re-releases. Older titles need more votes to qualify, ratings from fewer than 20 votes show “Not rated”, and Top rated rotates through the 360 highest-rated films over six days. Idle trailers now notice remote browsing, football updates frequently only around kickoff, movie details retry after a failed load, and a downloaded update is verified once instead of on every return to Home.
