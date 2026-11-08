@@ -44,6 +44,35 @@ class DeviceStatsTest {
         assertEquals("1024 × 768", resolutionLabel(1024, 768))
     }
 
+    @Test fun displayNamesOnlyTheBestHdrFormat() {
+        val dolbyVision = android.view.Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION
+        val hdr10 = android.view.Display.HdrCapabilities.HDR_TYPE_HDR10
+        assertEquals("Dolby Vision", bestHdrLabel(intArrayOf(hdr10, dolbyVision)))
+        assertEquals("HDR10", bestHdrLabel(intArrayOf(hdr10)))
+        assertEquals("", bestHdrLabel(IntArray(0)))
+    }
+
+    @Test fun cpuUsageComesFromIdleResidency() {
+        assertEquals(25, cpuUsagePercent(idleMicros = 12_000_000, wallMicros = 4_000_000, cores = 4))
+        assertEquals(0, cpuUsagePercent(idleMicros = 20_000_000, wallMicros = 4_000_000, cores = 4))
+        assertNull(cpuUsagePercent(idleMicros = 0, wallMicros = 4_000_000, cores = 4))
+        assertNull(cpuUsagePercent(idleMicros = 100, wallMicros = 0, cores = 4))
+    }
+
+    @Test fun textRunsSeparateNumbersFromWords() {
+        assertEquals(listOf(TextRun("14:05", true)), textRuns("14:05"))
+        assertEquals(listOf(TextRun("0.5", true), TextRun(" GB", false)), textRuns("0.5 GB"))
+        assertEquals(listOf(TextRun("8", true), TextRun("° / ", false), TextRun("-2", true), TextRun("°", false)), textRuns("8° / -2°"))
+        assertEquals(listOf(TextRun("Wi-Fi", false)), textRuns("Wi-Fi"))
+        assertEquals(emptyList<TextRun>(), textRuns(""))
+    }
+
+    @Test fun numbersRollTowardTheirChange() {
+        assertTrue(numberRose("19", "20"))
+        assertEquals(false, numberRose("20", "19"))
+        assertEquals(false, numberRose("1", "-1"))
+    }
+
     @Test fun homeDateFollowsLanguage() {
         val date = LocalDate.of(2026, 11, 8)
         assertEquals("Sun 8 Nov", formatHomeDate(date, false))

@@ -157,7 +157,7 @@ import java.time.format.DateTimeFormatter
 private val LocalDialogReady = staticCompositionLocalOf { false }
 internal val LocalInternet = staticCompositionLocalOf { false }
 internal val LocalForeground = staticCompositionLocalOf { true }
-internal val LocalDeviceStatsEnabled = staticCompositionLocalOf { false }
+internal val LocalDeviceStatsEnabled = staticCompositionLocalOf { true }
 
 private val RowBringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
@@ -275,7 +275,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
     val online = rememberInternetAvailable(isForeground)
     val updateStatus by updater.status.collectAsState()
     val updateAvailable by updater.available.collectAsState()
-    var deviceStatsEnabled by remember { mutableStateOf(preferences.getBoolean("deviceStatsEnabled", false)) }
+    var deviceStatsEnabled by remember { mutableStateOf(preferences.getBoolean("deviceStatsEnabled", true)) }
     CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground, LocalInternet provides online,
         LocalDeviceStatsEnabled provides deviceStatsEnabled) { MaterialTheme(
         typography = AppTypography,
@@ -1393,6 +1393,8 @@ internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState
         Spacer(Modifier.height(10.dp))
         AnimatedContent(
             targetState = snapshot,
+            // Only loading to loaded cross-fades; a new score must roll in place.
+            contentKey = { it != null },
             transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) },
             label = "football update",
         ) { shown ->
@@ -1442,11 +1444,10 @@ private fun FootballMatchSummary(label: String, match: FootballMatch, live: Bool
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FootballTeam(match.home, match.homeId, match.homeCountry, Modifier.weight(1f, fill = false))
             val score = footballScore(match)
-            Text(score, Modifier.widthIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
-                .background(accent.copy(alpha = if (live) .18f else if (score != "vs") .12f else 0f)).padding(horizontal = 8.dp, vertical = 1.dp),
-                textAlign = TextAlign.Center, color = accent,
-                style = (if (score == "vs") TvType.Caption else TvType.Subhead).copy(fontFeatureSettings = "tnum").overArtwork(),
-                fontWeight = FontWeight.SemiBold, maxLines = 1)
+            RollingText(score, (if (score == "vs") TvType.Caption else TvType.Subhead).copy(fontWeight = FontWeight.SemiBold).overArtwork(),
+                Modifier.widthIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
+                    .background(accent.copy(alpha = if (live) .18f else if (score != "vs") .12f else 0f)).padding(horizontal = 8.dp, vertical = 1.dp),
+                color = accent, arrangement = Arrangement.Center)
             FootballTeam(match.away, match.awayId, match.awayCountry, Modifier.weight(1f, fill = false))
         }
     }
@@ -1700,7 +1701,7 @@ private fun AppCard(
     val tileWidth = AppTileWidth
     val tileHeight = AppTileHeight
     val focusEdge = animateColorAsState(
-        if (moving) WarmAccent else if (focused) FocusSurface else Color.Transparent,
+        if (moving) WarmAccent else if (focused) Color.White else Color.Transparent,
         tween(180), label = "App focus edge",
     )
     val tileBackground = remember { Brush.linearGradient(listOf(Color(0xFF242936), Color(0xFF171A22))) }
@@ -2190,7 +2191,7 @@ private fun SettingsDialog(
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
                         }
                         4 -> DevicePanel {
-                            SettingsRow("Show on Home", Modifier.focusRequester(contentFocus), subtitle = "Free memory, storage and network", checked = deviceStatsEnabled) { onDeviceStats(!deviceStatsEnabled) }
+                            SettingsRow("Show on Home", Modifier.focusRequester(contentFocus), subtitle = "CPU and free memory", checked = deviceStatsEnabled) { onDeviceStats(!deviceStatsEnabled) }
                         }
                     }
                 }
@@ -2540,7 +2541,7 @@ private fun PosterCard(
     val focused by interaction.collectIsFocusedAsState()
     val pressed by interaction.collectIsPressedAsState()
     val retainArtwork = with(LocalDensity.current) { retainBackdrop(width.roundToPx(), height.roundToPx()) }
-    val rim = animateColorAsState(if (focused) FocusSurface else Color.Transparent, tween(180), label = "Poster focus edge")
+    val rim = animateColorAsState(if (focused) Color.White else Color.Transparent, tween(180), label = "Poster focus edge")
     // Resting artwork stays clean; title and scrim fade in with focus, composed only while needed.
     val label = animateFloatAsState(if (focused || alwaysLabeled) 1f else 0f, tween(TvMotion.LabelMillis), label = "Poster label")
     val labelComposed by remember { derivedStateOf { label.value > 0f } }

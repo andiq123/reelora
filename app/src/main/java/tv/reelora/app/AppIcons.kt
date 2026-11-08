@@ -75,6 +75,7 @@ internal val HideAppIcon = lineIcon(
 )
 
 // Device status glyphs.
+internal val CpuIcon = lineIcon("CPU", "M8.5 6.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z", "M10.5 10.5h3v3h-3z", "M9.5 3.5v3", "M14.5 3.5v3", "M9.5 17.5v3", "M14.5 17.5v3", "M3.5 9.5h3", "M3.5 14.5h3", "M17.5 9.5h3", "M17.5 14.5h3")
 internal val MemoryIcon = lineIcon("Memory", "M4.5 7h15A1.5 1.5 0 0 1 21 8.5v6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 14.5v-6A1.5 1.5 0 0 1 4.5 7z", "M7.5 16v3", "M12 16v3", "M16.5 16v3", "M8 11v1", "M12 11v1", "M16 11v1")
 internal val StorageIcon = lineIcon("Storage", "M5 13.5L7.3 6a1.5 1.5 0 0 1 1.4-1h6.6a1.5 1.5 0 0 1 1.4 1l2.3 7.5", "M4.5 13.5h15a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-3a1.5 1.5 0 0 1 1.5-1.5z", "M7.5 16.5v.01")
 internal val EthernetIcon = lineIcon("Ethernet", "M9.5 3.5h5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z", "M12 9.5v4.5", "M5 20.5v-4.5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4.5")

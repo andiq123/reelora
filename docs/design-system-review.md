@@ -100,11 +100,11 @@ This pass supersedes earlier notes where they differ, including the dock's glass
 
 ### Device readings
 
-Home shows the date and today's high and low from the existing weather request. Free memory, free storage, and network are opt-in under Settings → Device, which also shows download speed, display mode, and thermal state. Offline, very weak Wi-Fi, and overheating surface on Home even when the readings are off.
+Home shows the date and today's high and low from the existing weather request. CPU use and free memory appear below them and can be switched off under Settings → Device, which also shows storage, network speed, display mode, and any thermal warning. Offline, very weak Wi-Fi, and overheating surface on Home even when the readings are off.
 
-System-wide CPU load is deliberately absent. `/proc/stat` and `/proc/loadavg` were denied in the app sandbox on the Android 12 emulator, and clock speed does not measure load. Sampling is off the main thread, foreground only, and paused behind dialogs; values round before reaching Compose. The update dot uses at most one foreground lookup a day and never downloads.
+Android denies apps `/proc/stat`, so CPU use comes from each core's `cpuidle` residency. Over 3-second windows it tracked `/proc/stat` within about two points on the Fire TV Stick 4K Max and onn 4K Plus. Devices without `cpuidle` statistics omit the reading. Sampling is off the main thread, foreground only, and paused behind dialogs; values round before reaching Compose. The update dot uses at most one foreground lookup a day and never downloads.
 
-Readings were checked on the emulator only. Thermal, signal strength, and HDR depend on what each vendor reports and have not been verified on Fire TV.
+`RollingText` is the one treatment for changing text: only digits that differ roll, in the direction of the change, and words cross-fade. `AnimatedMeter` does the same for progress. Both follow the system animator scale, so a device with animation scales at 0 shows every change instantly; the Fire TV test unit was set that way.
 
 ## Ownership and reuse
 

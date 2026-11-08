@@ -73,7 +73,7 @@ class WidgetPreviewActivity : ComponentActivity() {
                             HomeStatus(weather, state, true, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = ScreenMargin),
                                 deviceStatsEnabled = scenario == "stats" || scenario == "hot",
                                 previewStats = if (scenario == "stats" || scenario == "hot") DeviceStats(1_288_490_189, 2_147_483_648, 5_798_205_849, 17_179_869_184, NetworkKind.Wifi, 2,
-                                    if (scenario == "hot") android.os.PowerManager.THERMAL_STATUS_MODERATE else 0) else null)
+                                    if (scenario == "hot") android.os.PowerManager.THERMAL_STATUS_MODERATE else 0, cpuUsage = 12) else null)
                         }
                         Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp)
                             .background(Color(0xB4141820), RoundedCornerShape(24.dp)).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {

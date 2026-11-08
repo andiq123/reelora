@@ -24,7 +24,6 @@ internal val ActionSurface = Color(0x1FFFFFFF)
 internal val SelectedSurface = Color(0x33FFFFFF)
 internal val GroupSurface = Color(0x26000000)
 internal val DialogSurface = Brush.verticalGradient(listOf(Color(0xE6383E49), Color(0xF020252D)))
-internal val DockSurface = Color(0x8F30343C)
 internal val FocusSurface = Color(0xFFF1F3F5)
 internal val FocusContent = Color(0xFF12161C)
 internal val Accent = Color(0xFFA7CCF5)
@@ -34,7 +33,6 @@ internal val SubtleBorder = Color(0x24FFFFFF)
 internal val DialogShape = RoundedCornerShape(36.dp)
 internal val ControlShape = RoundedCornerShape(22.dp)
 internal val ActionShape = RoundedCornerShape(percent = 50)
-internal val DockShape = RoundedCornerShape(32.dp)
 internal val AppTileCorner = 18.dp
 internal val AppTileShape = RoundedCornerShape(AppTileCorner)
 internal val PosterCorner = 12.dp
@@ -98,4 +96,6 @@ internal object TvMotion {
     const val FocusScale = 1.06f
     const val PressScale = .97f
     const val LabelMillis = 160
+    const val NumberMillis = 320
+    const val MeterMillis = 600
 }

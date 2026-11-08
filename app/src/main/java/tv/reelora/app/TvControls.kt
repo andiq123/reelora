@@ -2,6 +2,7 @@ package tv.reelora.app
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -118,6 +119,15 @@ internal fun Modifier.tvFocusRim(color: () -> Color, shape: Shape, width: Dp = 3
     }
 }
 
+/** A thin meter that glides between readings; progress is read in the draw pass only. */
+@Composable
+internal fun AnimatedMeter(fraction: Float, track: Color, fill: Color, modifier: Modifier = Modifier) {
+    val progress = animateFloatAsState(fraction.coerceIn(0f, 1f), tween(TvMotion.MeterMillis, easing = TvMotion.Emphasized), label = "Meter")
+    Box(modifier.fillMaxWidth().height(4.dp).clip(ActionShape).background(track).drawBehind {
+        drawRoundRect(fill, size = Size(size.width * progress.value, size.height), cornerRadius = CornerRadius(size.height / 2))
+    })
+}
+
 private const val StarGlyph = "★ "
 
 /** One metadata line with a single separator style and a real rating icon. */
@@ -156,7 +166,7 @@ internal fun DialogHeader(
         Column(Modifier.weight(1f)) {
             Text(tr(title), color = Color.White, style = TvType.Title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
-            Text(tr(subtitle), color = SecondaryText, style = TvType.Footnote, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            RollingText(tr(subtitle), TvType.Footnote, color = SecondaryText, maxLines = 2, arrangement = Arrangement.Start)
         }
         action?.invoke()
     }
@@ -242,10 +252,9 @@ internal fun SettingsRow(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(tr(title), color = ink, style = TvType.Body,
                     fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                subtitle?.let { Text(tr(it), color = secondary, style = TvType.Caption, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                subtitle?.let { RollingText(tr(it), TvType.Caption, color = secondary, maxLines = 2, arrangement = Arrangement.Start) }
             }
-            value?.let { Text(tr(it), Modifier.widthIn(max = 108.dp), color = secondary, style = TvType.Footnote,
-                textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            value?.let { RollingText(tr(it), TvType.Footnote, Modifier.widthIn(max = 108.dp), color = secondary, textAlign = TextAlign.End, maxLines = 2) }
             // Values, chevrons, and switches all finish on the same right edge.
             if (checked != null || navigation) Box(Modifier.height(24.dp), contentAlignment = Alignment.CenterEnd) {
                 if (checked != null) {

@@ -7,8 +7,8 @@ internal val LocalRomanian = staticCompositionLocalOf { false }
 
 private val RomanianUi = mapOf(
     "Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo · Inter typeface, SIL OFL" to "Filme de la TMDB · Disponibilitate de la JustWatch · Vreme de la Open-Meteo · Font Inter, SIL OFL",
-    "Device" to "Dispozitiv", "Show on Home" to "Afișează pe Acasă", "Free memory, storage and network" to "Memorie liberă, stocare și rețea",
-    "Free memory" to "Memorie liberă", "Free storage" to "Stocare liberă", "Memory" to "Memorie", "Storage" to "Stocare", "Network" to "Rețea",
+    "Device" to "Dispozitiv", "Show on Home" to "Afișează pe Acasă", "CPU and free memory" to "CPU și memorie liberă", "CPU in use" to "CPU utilizat", "in use" to "utilizat", "CPU" to "CPU",
+    "Free memory" to "Memorie liberă", "Memory" to "Memorie", "Storage" to "Stocare", "Network" to "Rețea",
     "Display" to "Ecran", "Thermal" to "Temperatură dispozitiv", "Normal" to "Normală", "Warm" to "Cald", "Hot" to "Fierbinte",
     "free of" to "libere din", "Offline" to "Fără conexiune", "Ethernet" to "Ethernet", "Wi-Fi" to "Wi-Fi", "Connected" to "Conectat",
     "Device is warm" to "Dispozitivul este cald", "Device is hot" to "Dispozitivul este fierbinte", "Update available" to "Actualizare disponibilă",
@@ -36,7 +36,7 @@ private val RomanianUi = mapOf(
     "HOME" to "ACASĂ", "Featured movies or a calm wallpaper" to "Filme recomandate sau un fundal calm",
     "WEATHER & TIME" to "VREME ȘI ORĂ", "Location, temperature and clock" to "Locație, temperatură și ceas",
     "SYSTEM" to "SISTEM", "Home and Android controls" to "Comenzi pentru ecranul principal și Android",
-    "Done" to "Gata", "Search" to "Căutare", "Hidden" to "Ascunse", "Labels on" to "Etichete pornite",
+    "Done" to "Gata", "Search" to "Căutare", "Labels on" to "Etichete pornite",
     "Labels off" to "Etichete oprite", "Lifted focus" to "Focus ridicat", "Outline focus" to "Contur focus",
     "Movies on" to "Filme pornite", "Apps only" to "Doar aplicații", "New wallpaper" to "Fundal nou",
     "Football on" to "Fotbal pornit", "Football off" to "Fotbal oprit", "Theater on" to "Cinema pornit",

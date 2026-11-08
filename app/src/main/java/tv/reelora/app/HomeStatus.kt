@@ -31,6 +31,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
@@ -63,7 +64,7 @@ internal fun HomeStatus(
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         HomeClock(now.toLocalTime(), use24HourClock)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(date, color = Color.White, style = TvType.Footnote.overArtwork(), fontWeight = FontWeight.Medium)
+            RollingText(date, TvType.Footnote.copy(fontWeight = FontWeight.Medium).overArtwork(), color = Color.White)
             AnimatedContent(
                 targetState = weather?.let { weatherKind(it.code, it.isDay) },
                 transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) },
@@ -75,16 +76,17 @@ internal fun HomeStatus(
             HomeTemperature(weather?.temperature, TvType.Footnote.overArtwork().copy(color = Color.White, fontWeight = FontWeight.Medium))
             val high = weather?.high
             val low = weather?.low
-            if (high != null && low != null) Text("$high° / $low°", color = StatusSecondary, style = TvType.Footnote.overArtwork())
+            if (high != null && low != null) RollingText("$high° / $low°", TvType.Footnote.overArtwork(), color = StatusSecondary)
         }
-        if (stats != null && deviceStatsEnabled) {
+        val connectionProblem = stats != null && (stats.network == NetworkKind.Offline || (stats.network == NetworkKind.Wifi && stats.wifiBars == 0))
+        if (stats != null && (deviceStatsEnabled || connectionProblem)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatusReading(MemoryIcon, "Free memory", formatBytes(stats.memoryFree))
-                StatusReading(StorageIcon, "Free storage", formatBytes(stats.storageFree))
-                NetworkGlyph(stats, StatusSecondary)
+                if (deviceStatsEnabled) {
+                    stats.cpuUsage?.let { StatusReading(CpuIcon, "CPU in use", it.toString(), "%") }
+                    if (stats.memoryTotal > 0) StatusReading(MemoryIcon, "Free memory", formatBytes(stats.memoryFree).substringBefore(' '), " GB")
+                }
+                if (connectionProblem) NetworkGlyph(stats, WarmAccent)
             }
-        } else if (stats != null && (stats.network == NetworkKind.Offline || (stats.network == NetworkKind.Wifi && stats.wifiBars == 0))) {
-            NetworkGlyph(stats, WarmAccent)
         }
         if (stats?.runningHot == true) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(ThermometerIcon, contentDescription = null, tint = WarmAccent, modifier = Modifier.size(15.dp))
@@ -98,11 +100,11 @@ internal fun HomeStatus(
 }
 
 @Composable
-private fun StatusReading(icon: ImageVector, description: String, value: String) {
-    val spoken = "${tr(description)} $value"
+private fun StatusReading(icon: ImageVector, description: String, number: String, unit: String) {
+    val spoken = "${tr(description)} $number$unit"
     Row(Modifier.clearAndSetSemantics { contentDescription = spoken }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Icon(icon, contentDescription = null, tint = StatusSecondary, modifier = Modifier.size(15.dp))
-        Text(value, color = StatusSecondary, style = TvType.Caption.copy(fontFeatureSettings = "tnum").overArtwork())
+        Icon(icon, contentDescription = null, tint = StatusSecondary, modifier = Modifier.size(16.dp))
+        RollingText(number + unit, TvType.Footnote.overArtwork(), color = Color.White.copy(alpha = .88f))
     }
 }
 
@@ -132,6 +134,7 @@ internal fun DevicePanel(toggle: @Composable () -> Unit) {
     val display = rememberDisplaySummary()
     toggle()
     if (stats != null) {
+        stats.cpuUsage?.let { DeviceReading(CpuIcon, "CPU", "$it% ${tr("in use")}", it / 100f) }
         DeviceReading(MemoryIcon, "Memory", "${formatBytes(stats.memoryFree)} ${tr("free of")} ${formatBytes(stats.memoryTotal)}", usedFraction(stats.memoryFree, stats.memoryTotal))
         DeviceReading(StorageIcon, "Storage", "${formatBytes(stats.storageFree)} ${tr("free of")} ${formatBytes(stats.storageTotal)}", usedFraction(stats.storageFree, stats.storageTotal))
         DeviceReading(networkIcon(stats), "Network", listOfNotNull(tr(networkName(stats)), speed?.let { "↓ ${formatSpeed(it)}" }).joinToString(" · "))
@@ -139,7 +142,7 @@ internal fun DevicePanel(toggle: @Composable () -> Unit) {
     display?.let {
         DeviceReading(DisplayIcon, "Display", listOf(it.resolution, it.hdr, it.refresh).filter(String::isNotBlank).joinToString(" · "))
     }
-    if (stats != null) DeviceReading(ThermometerIcon, "Thermal", tr(thermalLabel(stats.thermalStatus)))
+    if (stats != null && thermalLabel(stats.thermalStatus) != "Normal") DeviceReading(ThermometerIcon, "Thermal", tr(thermalLabel(stats.thermalStatus)))
 }
 
 internal fun usedFraction(free: Long, total: Long): Float =
@@ -157,14 +160,14 @@ private fun DeviceReading(icon: ImageVector, label: String, value: String, used:
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(icon, contentDescription = null, tint = secondary, modifier = Modifier.size(18.dp))
-            Text(tr(label), color = ink, style = TvType.Body, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), maxLines = 1)
-            Text(value, color = secondary, style = TvType.Footnote, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // The label keeps its width; a long value is what gives way.
+            Text(tr(label), color = ink, style = TvType.Body, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+            RollingText(value, TvType.Footnote, Modifier.weight(1f), color = secondary)
         }
         if (used != null) {
             Spacer(Modifier.height(7.dp))
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(ActionShape).background(if (focused) FocusContent.copy(alpha = .16f) else Color.White.copy(alpha = .14f))) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth(used).clip(ActionShape).background(if (focused) FocusContent else Color.White.copy(alpha = .85f)))
-            }
+            AnimatedMeter(used, if (focused) FocusContent.copy(alpha = .16f) else Color.White.copy(alpha = .14f),
+                if (focused) FocusContent else Color.White.copy(alpha = .85f))
         }
     }
 }

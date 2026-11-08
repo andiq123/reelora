@@ -8,6 +8,7 @@ import android.net.TrafficStats
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
+import android.os.SystemClock
 import android.view.Display
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -15,7 +16,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import java.io.File
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -32,6 +35,7 @@ internal data class DeviceStats(
     val network: NetworkKind = NetworkKind.Other,
     val wifiBars: Int = 3,
     val thermalStatus: Int = PowerManager.THERMAL_STATUS_NONE,
+    val cpuUsage: Int? = null,
 ) {
     val runningHot get() = thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
 }
@@ -63,7 +67,35 @@ internal fun thermalLabel(status: Int): String = when {
     else -> "Normal"
 }
 
-private fun sampleDeviceStats(context: Context, detailed: Boolean): DeviceStats {
+/** Share of core time spent busy over a window; null when the kernel reported no idle time. */
+internal fun cpuUsagePercent(idleMicros: Long, wallMicros: Long, cores: Int): Int? {
+    if (idleMicros <= 0L || wallMicros <= 0L || cores <= 0) return null
+    return ((1.0 - idleMicros.toDouble() / (wallMicros * cores)) * 100).roundToInt().coerceIn(0, 100)
+}
+
+/**
+ * Android denies apps /proc/stat, but each core's cpuidle residency stays world-readable.
+ * On Fire TV and onn this tracked /proc/stat within about two points.
+ */
+private class CpuLoadMeter {
+    private val cores = File("/sys/devices/system/cpu").listFiles { file -> file.name.matches(Regex("cpu\\d+")) }.orEmpty()
+    private val idleTimes = cores.flatMap { core ->
+        File(core, "cpuidle").listFiles { file -> file.name.startsWith("state") }.orEmpty().map { File(it, "time") }
+    }
+    private var lastIdle = -1L
+    private var lastWall = 0L
+
+    fun usage(): Int? {
+        val idle = runCatching { idleTimes.sumOf { it.readText().trim().toLong() } }.getOrNull() ?: return null
+        val wall = SystemClock.elapsedRealtimeNanos() / 1_000
+        val result = if (lastIdle < 0) null else cpuUsagePercent(idle - lastIdle, wall - lastWall, cores.size)
+        lastIdle = idle
+        lastWall = wall
+        return result
+    }
+}
+
+private fun sampleDeviceStats(context: Context, detailed: Boolean, cpu: CpuLoadMeter): DeviceStats {
     val connectivity = context.getSystemService(ConnectivityManager::class.java)
     val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
     val network = when {
@@ -85,6 +117,7 @@ private fun sampleDeviceStats(context: Context, detailed: Boolean): DeviceStats 
         memoryTotal = roundToTenthGib(memory.totalMem),
         storageFree = roundToTenthGib(storage.availableBytes),
         storageTotal = roundToTenthGib(storage.totalBytes),
+        cpuUsage = cpu.usage(),
     )
 }
 
@@ -98,9 +131,12 @@ internal fun rememberDeviceStats(active: Boolean, detailed: Boolean): DeviceStat
     val foreground = LocalForeground.current
     val stats by produceState<DeviceStats?>(null, context, active && foreground, detailed) {
         if (!active || !foreground) return@produceState
+        val cpu = CpuLoadMeter()
+        // A short first window, so usage appears almost at once instead of a full period later.
+        if (detailed) withContext(Dispatchers.IO) { cpu.usage() }.also { delay(1_000L) }
         while (true) {
-            value = withContext(Dispatchers.IO) { runCatching { sampleDeviceStats(context, detailed) }.getOrNull() } ?: value
-            delay(if (detailed) 5_000L else 30_000L)
+            value = withContext(Dispatchers.IO) { runCatching { sampleDeviceStats(context, detailed, cpu) }.getOrNull() } ?: value
+            delay(if (detailed) 3_000L else 30_000L)
         }
     }
     return stats
@@ -134,16 +170,15 @@ internal fun resolutionLabel(width: Int, height: Int): String = when (maxOf(widt
     else -> "$width × $height"
 }
 
+// Fire TV reports every format it supports, so the row names only the best one.
 @Suppress("DEPRECATION")
-private fun hdrLabel(types: IntArray): String = types.toList().mapNotNull {
-    when (it) {
-        Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION -> "Dolby Vision"
-        Display.HdrCapabilities.HDR_TYPE_HDR10 -> "HDR10"
-        Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS -> "HDR10+"
-        Display.HdrCapabilities.HDR_TYPE_HLG -> "HLG"
-        else -> null
-    }
-}.joinToString(", ")
+internal fun bestHdrLabel(types: IntArray): String = when {
+    Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION in types -> "Dolby Vision"
+    Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS in types -> "HDR10+"
+    Display.HdrCapabilities.HDR_TYPE_HDR10 in types -> "HDR10"
+    Display.HdrCapabilities.HDR_TYPE_HLG in types -> "HLG"
+    else -> ""
+}
 
 @Composable
 @Suppress("DEPRECATION")
@@ -155,7 +190,7 @@ internal fun rememberDisplaySummary(): DisplaySummary? {
             val mode = display.mode
             DisplaySummary(
                 resolutionLabel(mode.physicalWidth, mode.physicalHeight),
-                hdrLabel(display.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)),
+                bestHdrLabel(display.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)),
                 "${Math.round(mode.refreshRate)} Hz",
             )
         }.getOrNull()
