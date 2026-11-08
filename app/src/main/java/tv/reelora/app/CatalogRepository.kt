@@ -71,7 +71,7 @@ data class MediaDetails(
 @Immutable data class CatalogSection(val page: Int, val title: String, val items: List<MediaItem>)
 @Immutable data class CatalogResult(val sections: List<CatalogSection>, val isDemo: Boolean)
 @Immutable data class CatalogSpec(val page: Int, val title: String, val path: String, val mediaType: String)
-@Immutable data class WeatherNow(val temperature: Int, val code: Int, val isDay: Boolean = true)
+@Immutable data class WeatherNow(val temperature: Int, val code: Int, val isDay: Boolean = true, val high: Int? = null, val low: Int? = null)
 @Immutable data class FootballMatch(val home: String, val away: String, val date: String, val time: String, val homeScore: Int?, val awayScore: Int?, val status: String = "", val competition: String = "", val priority: Int = 99, val homeId: String = "", val awayId: String = "", val homeCountry: String = "", val awayCountry: String = "", val kickoff: Instant? = null)
 @Immutable data class FootballHint(val competition: String, val days: Int)
 @Immutable data class FootballSnapshot(val live: FootballMatch?, val next: FootballMatch?, val previous: FootballMatch?, val hint: FootballHint? = null)
@@ -114,10 +114,14 @@ object WeatherRepository {
             } ?: return null
         }
         val unit = if (celsius) "celsius" else "fahrenheit"
-        val current = readJson(
-            "https://api.open-meteo.com/v1/forecast?latitude=${place.first}&longitude=${place.second}&current=temperature_2m,weather_code,is_day&temperature_unit=$unit",
-        ).getJSONObject("current")
-        WeatherNow(current.getDouble("temperature_2m").toInt(), current.getInt("weather_code"), current.optInt("is_day", 1) == 1)
+        val forecast = readJson(
+            "https://api.open-meteo.com/v1/forecast?latitude=${place.first}&longitude=${place.second}&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto&temperature_unit=$unit",
+        )
+        val current = forecast.getJSONObject("current")
+        val daily = forecast.optJSONObject("daily")
+        fun today(key: String) = daily?.optJSONArray(key)?.optDouble(0)?.takeUnless(Double::isNaN)?.let(Math::round)?.toInt()
+        WeatherNow(Math.round(current.getDouble("temperature_2m")).toInt(), current.getInt("weather_code"), current.optInt("is_day", 1) == 1,
+            today("temperature_2m_max"), today("temperature_2m_min"))
     }.getOrNull()
 }
 
@@ -259,6 +263,25 @@ internal fun isLiveFootballMatch(match: FootballMatch, now: Instant): Boolean = 
 object CatalogRepository {
     private val personCredits = boundedCache<Int, List<MediaItem>>(24)
     private val mediaDetails = boundedCache<String, MediaDetails>(48)
+    private val titleLogos = boundedCache<String, String>(96)
+
+    /** Null until looked up; empty when TMDB has no usable logo for the title. */
+    fun cachedTitleLogo(item: MediaItem): String? = titleLogos["${item.mediaType}-${item.id}"]
+
+    suspend fun titleLogo(item: MediaItem): String? {
+        val key = "${item.mediaType}-${item.id}"
+        titleLogos[key]?.let { return it }
+        val token = BuildConfig.TMDB_TOKEN.trim()
+        if (token.isEmpty()) return ""
+        return withContext(Dispatchers.Default) {
+            requestResult {
+                val logos = getJson("/${item.mediaType}/${item.id}/images?include_image_language=en,null", token).optJSONArray("logos")
+                val path = pickTitleLogo(logos)
+                if (path == null) "" else "https://image.tmdb.org/t/p/w500$path"
+            }.onSuccess { titleLogos[key] = it }.getOrNull()
+        }
+    }
+
     @Volatile private var cachedCatalog: Pair<LocalDate, CatalogResult>? = null
     @Volatile private var cachedAt = 0L
     private val catalogRequests = Semaphore(4)
@@ -577,6 +600,13 @@ internal fun mediaRating(item: MediaItem): String =
     // A handful of early votes produces misleading 9+ averages.
     if (item.voteCount < 20 || !item.score.isFinite() || item.score <= 0.0) "Not rated"
     else "★ ${"%.1f".format(Locale.US, item.score)}"
+
+/** English first, then language-neutral; PNG only, because TMDB's SVG logos need another decoder. */
+internal fun pickTitleLogo(logos: JSONArray?): String? {
+    if (logos == null) return null
+    val candidates = (0 until logos.length()).map(logos::getJSONObject).filter { it.optString("file_path").endsWith(".png") }
+    return (candidates.firstOrNull { it.optString("iso_639_1") == "en" } ?: candidates.firstOrNull())?.optString("file_path")
+}
 
 internal fun formatRuntime(minutes: Int): String = when {
     minutes <= 0 -> ""

@@ -54,9 +54,11 @@ internal fun validateReleaseAsset(version: String, url: String, digest: String, 
     return AppRelease(version, url, digest.removePrefix("sha256:"), size)
 }
 
-// Android owns the download and retries. No service, polling loop, or background update checks.
+// Android owns the download and retries. No service, polling loop, or background update checks; the daily peek runs only in the foreground.
 internal class AppUpdater(private val activity: ComponentActivity) {
     val status = MutableStateFlow(UpdateStatus())
+    val available = MutableStateFlow(false)
+    private var peeked = false
     private val scope = MainScope()
     private val preferences = activity.getSharedPreferences("updates", Context.MODE_PRIVATE)
     private val downloads by lazy { activity.getSystemService(DownloadManager::class.java) }
@@ -83,10 +85,26 @@ internal class AppUpdater(private val activity: ComponentActivity) {
 
     fun resume() {
         foreground = true
+        peek()
         if (!awaitingPermission && preferences.contains("download")) refresh()
     }
 
     fun pause() { foreground = false }
+
+    // At most one foreground lookup a day, and it only lights a dot. Downloading stays manual.
+    private fun peek() {
+        if (peeked) return
+        peeked = true
+        val known = preferences.getString("peekVersion", null)
+        available.value = known != null && newerVersion(known, BuildConfig.VERSION_NAME)
+        if (System.currentTimeMillis() - preferences.getLong("peekedAt", 0L) < 24 * 60 * 60_000L) return
+        scope.launch {
+            runCatching { parseAppRelease(readJson("https://api.github.com/repos/andiq123/reelora/releases/latest")) }.onSuccess { release ->
+                preferences.edit().putString("peekVersion", release.version).putLong("peekedAt", System.currentTimeMillis()).apply()
+                available.value = newerVersion(release.version, BuildConfig.VERSION_NAME)
+            }
+        }
+    }
 
     fun check() {
         if (working) return

@@ -9,9 +9,8 @@ class DockNavigationTest {
         assertEquals(0, dockEntryIndex(listOf("c", "a", "b"), "c"))
         assertEquals(0, dockEntryIndex(listOf("a", "b"), "c"))
         assertEquals(3, dockEntryIndex(listOf("a", "b", "c"), "search"))
-        assertEquals(4, dockEntryIndex(listOf("a", "b", "c"), "hidden"))
-        assertEquals(5, dockEntryIndex(listOf("a", "b", "c"), "settings"))
-        assertEquals(2, dockEntryIndex(emptyList(), "settings"))
+        assertEquals(4, dockEntryIndex(listOf("a", "b", "c"), "settings"))
+        assertEquals(1, dockEntryIndex(emptyList(), "settings"))
         assertEquals(0, dockEntryIndex(emptyList(), null))
     }
 }

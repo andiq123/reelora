@@ -17,18 +17,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import java.time.LocalTime
 
 @Composable
 internal fun HomeClock(time: LocalTime, use24HourClock: Boolean) {
     val formatted = formatHomeTime(time, use24HourClock)
-    val style = TextStyle(
-        color = Color.White, fontSize = 28.sp, lineHeight = 34.sp,
-        fontWeight = FontWeight.Medium, letterSpacing = (-.5).sp, fontFeatureSettings = "tnum",
-    )
+    val style = TvType.Title.copy(color = Color.White, fontFeatureSettings = "tnum").overArtwork()
     Row(Modifier.clearAndSetSemantics { contentDescription = formatted }, verticalAlignment = Alignment.CenterVertically) {
         StatusNumber(formatted.substringBefore(':'), style)
         Text(":", style = style)

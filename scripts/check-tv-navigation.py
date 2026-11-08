@@ -90,20 +90,28 @@ press(*(['DPAD_LEFT'] * 40))
 def visible_movie_cards():
     import re
     result = []
-    for node in tree().iter('node'):
+    root = tree()
+    screen_height = int(re.findall(r'\d+', next(root.iter('node')).get('bounds'))[3])
+    for node in root.iter('node'):
         if node.get('focusable') != 'true':
             continue
         if any(child is not node and child.get('focusable') == 'true' for child in node.iter('node')):
             continue  # The mounted navigation container isn't a media card.
         labels = tuple(dict.fromkeys(n.get('text') or n.get('content-desc') for n in node.iter('node')
                        if n.get('text') or n.get('content-desc')))
-        if not any(' · ' in label for label in labels):
+        if not labels:
             continue
+        # A poster's identity is its title, since metadata shows only on the focused card.
+        labels = labels[:1]
         bounds = tuple(map(int, re.findall(r'\d+', node.get('bounds', ''))))
         if len(bounds) != 4 or bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
             continue
-        result.append((labels, bounds))
-    return result
+        # While browsing, the dock rides in the upper half and shelves sit in the lower half.
+        if (bounds[1] + bounds[3]) / 2 >= screen_height / 2:
+            result.append((labels, bounds))
+    # The next shelf peeks in below; only the active row counts.
+    top = min(((bounds[1] + bounds[3]) / 2 for _, bounds in result), default=0)
+    return [(labels, bounds) for labels, bounds in result if (bounds[1] + bounds[3]) / 2 - top < 10]
 
 before = visible_movie_cards()
 assert before, 'The first category did not mount'
@@ -134,7 +142,7 @@ after = visible_movie_cards()
 assert all(any(labels == other and abs((bounds[0] + bounds[2]) - (position[0] + position[2])) <= 4
                for other, position in after) for labels, bounds in before), \
     f'Up changed the destination horizontal viewport: {before} -> {after}'
-assert focused() in [labels for labels, _ in before], 'Up skipped the visible destination cards'
+assert focused()[:1] in [labels for labels, _ in before], 'Up skipped the visible destination cards'
 for _ in range(3):
     adb('shell', 'input', 'keyevent', '20', '20', '19', '19')
     assert any(' · ' in text for text in focused()), 'Rapid reversals lost movie focus'

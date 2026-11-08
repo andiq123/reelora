@@ -36,7 +36,7 @@ def resumed():
 
 try:
     press('MENU')
-    assert {'Check for updates', 'Install update'} & labels(), 'Settings menu was not shown'
+    assert 'Settings' in labels(), 'Settings menu was not shown'
     for _ in range(4):
         if 'Device settings' in labels():
             break

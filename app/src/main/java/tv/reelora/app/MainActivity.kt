@@ -35,15 +35,11 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -82,18 +78,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -134,9 +118,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -175,7 +156,8 @@ import java.time.format.DateTimeFormatter
 
 private val LocalDialogReady = staticCompositionLocalOf { false }
 internal val LocalInternet = staticCompositionLocalOf { false }
-private val LocalForeground = staticCompositionLocalOf { true }
+internal val LocalForeground = staticCompositionLocalOf { true }
+internal val LocalDeviceStatsEnabled = staticCompositionLocalOf { false }
 
 private val RowBringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
@@ -183,6 +165,22 @@ private val RowBringIntoViewSpec = object : BringIntoViewSpec {
         val end = offset + size
         if (offset >= margin && end <= containerSize - margin) return 0f
         return if (offset < margin) offset - margin else end - containerSize + margin
+    }
+}
+
+// Keeps a focused card inside the shared screen margin once a row has scrolled.
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun rememberRowBringIntoView(): BringIntoViewSpec {
+    val margin = with(LocalDensity.current) { ScreenMargin.toPx() }
+    return remember(margin) {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val end = offset + size
+                if (offset >= margin && end <= containerSize - margin) return 0f
+                return if (offset < margin) offset - margin else end - containerSize + margin
+            }
+        }
     }
 }
 
@@ -276,7 +274,11 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
     val isForeground by foreground.collectAsState()
     val online = rememberInternetAvailable(isForeground)
     val updateStatus by updater.status.collectAsState()
-    CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground, LocalInternet provides online) { MaterialTheme(
+    val updateAvailable by updater.available.collectAsState()
+    var deviceStatsEnabled by remember { mutableStateOf(preferences.getBoolean("deviceStatsEnabled", false)) }
+    CompositionLocalProvider(LocalRomanian provides romanian, LocalForeground provides isForeground, LocalInternet provides online,
+        LocalDeviceStatsEnabled provides deviceStatsEnabled) { MaterialTheme(
+        typography = AppTypography,
         colorScheme = darkColorScheme(
             primary = Accent,
             secondary = WarmAccent,
@@ -294,7 +296,6 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
         var selected by remember { mutableStateOf<MediaItem?>(null) }
         var searching by remember { mutableStateOf(false) }
         var searchFromSettings by remember { mutableStateOf(false) }
-        var hiddenFromSettings by remember { mutableStateOf(false) }
         var settingsSection by remember { mutableStateOf(0) }
         var settingsOpen by remember { mutableStateOf(false) }
         var weatherLocationOpen by remember { mutableStateOf(false) }
@@ -470,10 +471,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         use24HourClock = use24HourClock,
                         focusLift = focusLift,
                         showAppLabels = showAppLabels,
+                        updateAvailable = updateAvailable,
                         onLaunch = ::launchApp,
                         onSearch = { dockFocusKey = null; searchFromSettings = false; searching = true },
                         onSettings = { dockFocusKey = null; settingsOpen = true },
-                        onHiddenApps = { dockFocusKey = null; hiddenFromSettings = false; hiddenAppsOpen = true },
                         onConfigureApp = { dockFocusKey = launcherAppKey(it); configuredApp = it },
                         movingAppKey = movingAppKey,
                         dockFocusKey = if (dialogOpen) null else dockFocusKey,
@@ -493,10 +494,10 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         showAppLabels = showAppLabels,
                         wallpaperSeed = wallpaperSeed,
                         footballWidgetEnabled = footballWidgetEnabled,
+                        updateAvailable = updateAvailable,
                         onLaunch = ::launchApp,
                         onSearch = { dockFocusKey = null; searchFromSettings = false; searching = true },
                         onSettings = { dockFocusKey = null; settingsOpen = true },
-                        onHiddenApps = { dockFocusKey = null; hiddenFromSettings = false; hiddenAppsOpen = true },
                         onConfigureApp = { dockFocusKey = launcherAppKey(it); configuredApp = it },
                         movingAppKey = movingAppKey,
                         dockFocusKey = if (dialogOpen) null else dockFocusKey,
@@ -531,6 +532,12 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     onSectionChange = { settingsSection = it },
                     updateStatus = updateStatus,
                     onUpdate = updater::check,
+                    updateAvailable = updateAvailable,
+                    deviceStatsEnabled = deviceStatsEnabled,
+                    onDeviceStats = {
+                        deviceStatsEnabled = it
+                        preferences.edit().putBoolean("deviceStatsEnabled", it).apply()
+                    },
                     theaterEnabled = theaterEnabled,
                     idleMinutes = idleMinutes,
                     focusLift = focusLift,
@@ -596,7 +603,6 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                     },
                     onHiddenApps = {
                         settingsOpen = false
-                        hiddenFromSettings = true
                         hiddenAppsOpen = true
                     },
                     onSystemSettings = { context.openAndroidSettings() },
@@ -631,7 +637,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                         hiddenApps = hiddenApps - key
                         preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
                     },
-                    onDismiss = { hiddenAppsOpen = false; settingsOpen = hiddenFromSettings; hiddenFromSettings = false },
+                    onDismiss = { hiddenAppsOpen = false; settingsOpen = true },
                 )
                 configuredApp?.let { app ->
                     AppOptionsDialog(
@@ -654,7 +660,7 @@ private fun ReeloraApp(inputEvents: Channel<Unit>, foreground: MutableStateFlow<
                             val key = launcherAppKey(app)
                             val index = visibleApps.indexOfFirst { launcherAppKey(it) == key }
                             dockFocusKey = visibleApps.getOrNull(index + 1)?.let(::launcherAppKey)
-                                ?: visibleApps.getOrNull(index - 1)?.let(::launcherAppKey) ?: "hidden"
+                                ?: visibleApps.getOrNull(index - 1)?.let(::launcherAppKey) ?: "settings"
                             hiddenApps = hiddenApps + key
                             preferences.edit().putStringSet("hiddenApps", hiddenApps).apply()
                             configuredApp = null
@@ -726,6 +732,9 @@ internal fun launcherMovieSections(catalog: CatalogResult): List<CatalogSection>
 }
 
 @Suppress("DEPRECATION")
+// The dock's own Settings tile covers these; a second gear only adds noise.
+private val SystemSettingsPackages = setOf("com.android.tv.settings", "com.android.settings")
+
 private fun installedTvApps(context: Context): List<LauncherApp> {
     val manager = context.packageManager
     val intents = listOf(
@@ -733,7 +742,7 @@ private fun installedTvApps(context: Context): List<LauncherApp> {
         Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
     )
     return intents.flatMap { manager.queryIntentActivities(it, 0) }
-        .filter { it.activityInfo.packageName != context.packageName }
+        .filter { it.activityInfo.packageName != context.packageName && it.activityInfo.packageName !in SystemSettingsPackages }
         .distinctBy { it.activityInfo.packageName }
         .mapNotNull {
             runCatching { LauncherApp(
@@ -748,8 +757,7 @@ private fun installedTvApps(context: Context): List<LauncherApp> {
 
 internal fun dockEntryIndex(appKeys: List<String>, key: String?): Int = when (key) {
     "search" -> appKeys.size
-    "hidden" -> appKeys.size + 1
-    "settings" -> appKeys.size + 2
+    "settings" -> appKeys.size + 1
     else -> appKeys.indexOf(key).coerceAtLeast(0)
 }
 
@@ -1002,10 +1010,10 @@ private fun Home(
     use24HourClock: Boolean,
     focusLift: Boolean,
     showAppLabels: Boolean,
+    updateAvailable: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
-    onHiddenApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
     dockFocusKey: String?,
@@ -1016,6 +1024,8 @@ private fun Home(
     val chromeReveal = rememberHomeChrome(covered)
     val appListState = rememberLazyListState()
     val shelfHeight = with(LocalDensity.current) { 212.dp + 28.sp.toDp() }
+    // Title, gap, and card strip; the remaining height is the next shelf's peek.
+    val shelfStep = with(LocalDensity.current) { 172.dp + 28.sp.toDp() }
     var catalogOpen by remember { mutableStateOf(false) }
     var displayedRow by remember { mutableStateOf(0) }
     val browseReveal = remember { Animatable(0f) }
@@ -1180,8 +1190,9 @@ private fun Home(
                 heroContentVisible = !catalogOpen,
                 heroContentAlpha = { (1f - browseReveal.value * 3f).coerceIn(0f, 1f) * chromeReveal.value },
                 statusAlpha = { chromeReveal.value },
+                statusPaused = covered,
                 heroAction = {
-                    if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = SecondaryText, fontSize = 13.sp)
+                    if (hero == null) Text(tr(if (loading) "Loading discovery…" else "Discovery unavailable · your apps are ready"), color = SecondaryText, style = TvType.Footnote)
                     hero?.let { shown -> ActionButton(
                         "Explore",
                         Modifier.focusRequester(heroFocus).focusProperties { canFocus = !catalogOpen }.onFocusChanged {
@@ -1199,7 +1210,7 @@ private fun Home(
                     AppDock(
                         apps, appsReady, appListState, if (hero == null) FocusRequester.Default else heroFocus, appFocus,
                         FocusRequester.Default,
-                        focusLift, showAppLabels, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onHiddenApps, onSettings,
+                        focusLift, showAppLabels, updateAvailable, onLaunch, onConfigureApp, movingAppKey, dockFocusKey, onMoveApp, onMoveDone, onSettings,
                         onRowFocused = {
                             if (!navigating) {
                                 lastAppKey = it
@@ -1212,11 +1223,12 @@ private fun Home(
                 }
             }
             if (showCatalog && sections.isNotEmpty()) {
-                Column(Modifier.align(Alignment.BottomStart).padding(bottom = 24.dp)
-                    .fillMaxWidth().height(shelfHeight).graphicsLayer {
+                // Runs to the screen edge so the next shelf can peek in below the focused one.
+                Column(Modifier.align(Alignment.BottomStart)
+                    .fillMaxWidth().height(shelfHeight + 24.dp).graphicsLayer {
                         translationY = (1f - browseReveal.value) * (shelfHeight + 24.dp).toPx()
                         alpha = chromeReveal.value
-                    }.clipToBounds().padding(vertical = 8.dp)) {
+                    }.clipToBounds().padding(top = 8.dp)) {
                     // Neighbouring shelves stay composed and measured off-screen, so a remote press only
                     // moves layers that already exist; the next neighbour composes after the slide settles.
                     // A refreshed catalog must dispose rows that refer to its old indices.
@@ -1225,11 +1237,15 @@ private fun Home(
                         val first = minOf(settledRow - 1, shown).coerceAtLeast(0)
                         val last = maxOf(settledRow + 1, shown).coerceAtMost(sections.lastIndex)
                         for (index in first..last) key(index) {
-                            Box(Modifier.fillMaxSize().graphicsLayer {
+                            Box(Modifier.fillMaxWidth().height(shelfStep).graphicsLayer {
                                 val distance = index - rowPosition.value
                                 translationY = distance * size.height
-                                // Fully off-screen rows skip drawing but keep their images warm.
-                                alpha = if (kotlin.math.abs(distance) >= 1f) 0f else 1f
+                                // Rows outside the peek skip drawing but keep their images warm.
+                                alpha = when {
+                                    distance <= -1f || distance > 1f -> 0f
+                                    distance > 0f -> 1f - .45f * distance
+                                    else -> 1f
+                                }
                             }) {
                                 MediaRow(
                                     sections[index], onSelect, movieRowState[index], movieRowFocus[index], focusLift,
@@ -1262,10 +1278,10 @@ private fun AppsOnlyHome(
     showAppLabels: Boolean,
     wallpaperSeed: Int,
     footballWidgetEnabled: Boolean,
+    updateAvailable: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
-    onHiddenApps: () -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
     dockFocusKey: String?,
@@ -1331,11 +1347,11 @@ private fun AppsOnlyHome(
             )
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Background.copy(alpha = .70f), .40f to Background.copy(alpha = .42f), .70f to Color.Transparent, 1f to Background.copy(alpha = .68f))))
         }
-        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp).graphicsLayer { alpha = chromeReveal.value })
+        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = ScreenMargin).graphicsLayer { alpha = chromeReveal.value }, paused = covered)
         if (footballWidgetEnabled) FootballWidget(
             football,
             footballState,
-            Modifier.align(Alignment.TopStart).padding(top = 28.dp, start = 58.dp).graphicsLayer { alpha = chromeReveal.value },
+            Modifier.align(Alignment.TopStart).padding(top = 28.dp, start = ScreenMargin).graphicsLayer { alpha = chromeReveal.value },
         )
         AppDock(
             apps = apps,
@@ -1345,38 +1361,36 @@ private fun AppsOnlyHome(
             downFocus = FocusRequester.Default,
             focusLift = focusLift,
             showLabels = showAppLabels,
+            updateAvailable = updateAvailable,
             onLaunch = onLaunch,
             onConfigureApp = onConfigureApp,
             movingAppKey = movingAppKey,
             dockFocusKey = dockFocusKey,
             onMoveApp = onMoveApp,
             onMoveDone = onMoveDone,
-            onHiddenApps = onHiddenApps,
             onSettings = onSettings,
             onSearch = onSearch,
             appsReady = appsReady,
             onRowFocused = {},
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp).graphicsLayer { alpha = chromeReveal.value },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).graphicsLayer { alpha = chromeReveal.value },
         )
     }
 }
 
-private val FootballTextStyle = androidx.compose.ui.text.TextStyle(
-    shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = .6f), androidx.compose.ui.geometry.Offset(0f, 1f), 3f),
-)
+private val FootballText = Color(0xFFE9E8E3)
+private val FootballSecondary = Color(0xFFD1D5D6)
 
 @Composable
 internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState, modifier: Modifier = Modifier) {
-    val softWhite = Color(0xFFE9E8E3)
     val zone = rememberSystemTime().zone
     val online = LocalInternet.current
-    Column(modifier.widthIn(max = 490.dp).fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(androidx.compose.ui.res.painterResource(R.drawable.football_ball), contentDescription = null,
-                tint = softWhite.copy(alpha = .8f), modifier = Modifier.size(20.dp))
-            Text(tr("Football"), color = softWhite, fontSize = 16.sp, fontWeight = FontWeight.Medium, style = FootballTextStyle)
+    Column(modifier.widthIn(max = 470.dp).fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(painterResource(R.drawable.football_ball), contentDescription = null,
+                tint = FootballText.copy(alpha = .8f), modifier = Modifier.size(16.dp))
+            Text(tr("Football"), color = FootballText, style = TvType.Footnote.overArtwork(), fontWeight = FontWeight.Medium)
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(10.dp))
         AnimatedContent(
             targetState = snapshot,
             transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) },
@@ -1384,28 +1398,21 @@ internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState
         ) { shown ->
             if (shown == null) {
                 Text(tr(if (!LocalInternet.current) "Waiting for internet" else if (state == WeatherLoadState.Error) "Fixtures unavailable · retrying" else "Loading fixtures…"),
-                    color = softWhite.copy(alpha = .85f), fontSize = 17.sp, style = FootballTextStyle)
+                    color = FootballText.copy(alpha = .85f), style = TvType.Footnote.overArtwork())
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (shown.live != null) {
                         val current = online && state == WeatherLoadState.Ready
-                        FootballMatchSummary(if (current) "Live" else "Last known", shown.live,
-                            live = current, zone = zone)
-                        if (shown.next != null) {
-                            FootballGroupDivider()
-                            FootballMatchSummary("Upcoming", shown.next, zone = zone)
-                        }
+                        FootballMatchSummary(if (current) "Live" else "Last known", shown.live, live = current, zone = zone)
+                        if (shown.next != null) FootballMatchSummary("Upcoming", shown.next, zone = zone)
                     } else {
                         if (shown.next != null) FootballMatchSummary("Upcoming", shown.next, zone = zone)
-                        if (shown.previous != null) {
-                            if (shown.next != null) FootballGroupDivider()
-                            FootballMatchSummary("Previous", shown.previous, zone = zone)
-                        }
+                        if (shown.previous != null) FootballMatchSummary("Previous", shown.previous, zone = zone)
                     }
                     if (!online || state == WeatherLoadState.Error || shown.hint != null) {
                         Text(
                             if (!online) tr("Waiting for internet") else if (state == WeatherLoadState.Error) tr("Fixtures unavailable · retrying") else footballHintText(shown.hint, LocalRomanian.current),
-                            color = softWhite.copy(alpha = .72f), fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, style = FootballTextStyle,
+                            color = FootballText.copy(alpha = .72f), style = TvType.Caption.overArtwork(), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -1414,52 +1421,34 @@ internal fun FootballWidget(snapshot: FootballSnapshot?, state: WeatherLoadState
     }
 }
 
-@Composable
-private fun FootballGroupDivider() {
-    Box(Modifier.fillMaxWidth(.78f).height(1.dp).background(
-        Brush.horizontalGradient(listOf(Color.White.copy(alpha = .18f), Color.White.copy(alpha = .03f))),
-    ))
-}
-
+// One caption line (state, competition, time) above one line of teams.
 @Composable
 private fun FootballMatchSummary(label: String, match: FootballMatch, live: Boolean = false, zone: java.time.ZoneId) {
-    val accent = if (live) Color(0xFFA8E4C3) else Color(0xFFE9E8E3)
-    val secondary = Color(0xFFD1D5D6)
+    val accent = if (live) Color(0xFFA8E4C3) else FootballText
     val statusColor = if (live) accent else if (label == "Upcoming") Color(0xFFB6D6F4) else Color(0xFFD0C6E4)
     val locale = if (LocalRomanian.current) java.util.Locale.forLanguageTag("ro") else java.util.Locale.ENGLISH
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    val competition = match.competition.lowercase().split(' ').joinToString(" ") { it.replaceFirstChar(Char::uppercase) }
+    val context = listOf(competition, footballSchedule(match, locale, zone)).filter(String::isNotBlank).joinToString(" · ")
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                Modifier.clip(RoundedCornerShape(7.dp)).background(statusColor.copy(alpha = .10f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                when {
-                    live -> Box(Modifier.size(6.dp).background(statusColor, CircleShape))
-                    label == "Previous" -> Icon(Icons.Default.Check, contentDescription = null, tint = statusColor, modifier = Modifier.size(13.dp))
-                    else -> Icon(androidx.compose.ui.res.painterResource(R.drawable.fixture_calendar), contentDescription = null,
-                        tint = statusColor, modifier = Modifier.size(13.dp))
-                }
-                Text(tr(label), color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = FootballTextStyle)
+            when {
+                live -> Box(Modifier.size(6.dp).background(statusColor, CircleShape))
+                label == "Previous" -> Icon(CheckIcon, contentDescription = null, tint = statusColor, modifier = Modifier.size(13.dp))
+                else -> Icon(painterResource(R.drawable.fixture_calendar), contentDescription = null, tint = statusColor, modifier = Modifier.size(13.dp))
             }
-            if (match.competition.isNotBlank()) {
-                Text("·", color = secondary, fontSize = 12.sp)
-                Text(match.competition.lowercase().split(' ').joinToString(" ") { it.replaceFirstChar(Char::uppercase) },
-                    color = secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
-            }
+            Text(tr(label), color = statusColor, style = TvType.Caption.overArtwork(), fontWeight = FontWeight.Medium, maxLines = 1)
+            if (context.isNotBlank()) Text(context, color = FootballSecondary, style = TvType.Caption.overArtwork(), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FootballTeam(match.home, match.homeId, match.homeCountry, Modifier.weight(1f, fill = false))
-            Text(footballScore(match), Modifier.widthIn(min = 32.dp).clip(RoundedCornerShape(8.dp))
-                .background(accent.copy(alpha = if (live) .12f else if (match.homeScore != null) .06f else 0f)).padding(horizontal = 8.dp, vertical = 3.dp),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = accent,
-                fontSize = if (match.homeScore == null || match.awayScore == null) 16.sp else 22.sp,
-                fontWeight = FontWeight.SemiBold, style = FootballTextStyle)
+            val score = footballScore(match)
+            Text(score, Modifier.widthIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
+                .background(accent.copy(alpha = if (live) .18f else if (score != "vs") .12f else 0f)).padding(horizontal = 8.dp, vertical = 1.dp),
+                textAlign = TextAlign.Center, color = accent,
+                style = (if (score == "vs") TvType.Caption else TvType.Subhead).copy(fontFeatureSettings = "tnum").overArtwork(),
+                fontWeight = FontWeight.SemiBold, maxLines = 1)
             FootballTeam(match.away, match.awayId, match.awayCountry, Modifier.weight(1f, fill = false))
         }
-        val schedule = footballSchedule(match, locale, zone)
-        if (schedule.isNotBlank()) Text(schedule, color = secondary.copy(alpha = .85f), fontSize = 12.sp,
-            lineHeight = 16.sp, maxLines = 2, style = FootballTextStyle)
     }
 }
 
@@ -1473,17 +1462,16 @@ private fun FootballTeam(name: String, id: String, knownCountry: String, modifie
     val flag = remember(country) { footballCountryFlag(country) }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         // Reserve the tiny flag slot so a network result never shifts the team name.
-        Box(Modifier.width(with(androidx.compose.ui.platform.LocalDensity.current) { 20.sp.toDp() }), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(with(LocalDensity.current) { 18.sp.toDp() }), contentAlignment = Alignment.Center) {
             // Fire TV's emoji font does not reliably render England's subdivision flag.
             if (country.equals("England", ignoreCase = true)) Image(
-                androidx.compose.ui.res.painterResource(R.drawable.flag_england), contentDescription = country,
-                modifier = Modifier.fillMaxWidth().height(12.dp),
+                painterResource(R.drawable.flag_england), contentDescription = country,
+                modifier = Modifier.fillMaxWidth().height(11.dp),
             )
-            else if (flag != null) Text(flag, fontSize = 17.sp, maxLines = 1,
+            else if (flag != null) Text(flag, style = TvType.Footnote, maxLines = 1,
                 modifier = Modifier.semantics { contentDescription = country })
         }
-        Text(name, color = Color.White, fontSize = 22.sp, lineHeight = 26.sp,
-            fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, style = FootballTextStyle)
+        Text(name, color = Color.White, style = TvType.Subhead.overArtwork(), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -1521,13 +1509,13 @@ private fun AppDock(
     downFocus: FocusRequester,
     focusLift: Boolean,
     showLabels: Boolean,
+    updateAvailable: Boolean,
     onLaunch: (LauncherApp) -> Unit,
     onConfigureApp: (LauncherApp) -> Unit,
     movingAppKey: String?,
     dockFocusKey: String?,
     onMoveApp: (LauncherApp, Int) -> Int,
     onMoveDone: () -> Unit,
-    onHiddenApps: () -> Unit,
     onSettings: () -> Unit,
     onRowFocused: (String) -> Unit,
     onSearch: () -> Unit,
@@ -1550,7 +1538,7 @@ private fun AppDock(
     LaunchedEffect(dockFocusKey, appsReady) {
         if (!appsReady || dockFocusKey == null) return@LaunchedEffect
         val index = apps.indexOfFirst { launcherAppKey(it) == dockFocusKey }
-            .takeIf { it >= 0 } ?: if (dockFocusKey == "hidden") apps.size + 1 else return@LaunchedEffect
+            .takeIf { it >= 0 } ?: if (dockFocusKey == "settings") apps.size + 1 else return@LaunchedEffect
         if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) listState.scrollToItem(index)
         withFrameNanos { }
         returnFocus.requestFocus()
@@ -1560,18 +1548,18 @@ private fun AppDock(
     ) {
         // Like tvOS Home, tiles float directly over the artwork; no glass slab to composite each frame.
         if (!appsReady) {
-            Row(Modifier.padding(horizontal = 48.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(Modifier.padding(horizontal = ScreenMargin, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 repeat(5) {
                     Box(Modifier.size(AppTileWidth, AppTileHeight).background(Color.White.copy(alpha = .05f), AppTileShape))
                 }
             }
             return@Box
         }
-        CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
+        CompositionLocalProvider(LocalBringIntoViewSpec provides rememberRowBringIntoView()) {
         LazyRow(
             state = listState,
-            // Edge-to-edge like the movie rows, starting on the same 48 dp line.
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 16.dp),
+            // Edge-to-edge like the movie rows, starting on the shared screen margin.
+            contentPadding = PaddingValues(horizontal = ScreenMargin, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 // One layer for the shelf: drawing-only motion, no per-frame layout or per-app stagger.
@@ -1618,33 +1606,36 @@ private fun AppDock(
             }
             item(key = "search", contentType = "action") {
                 ShelfActionCard(
-                    "Search", Icons.Default.Search, focusLift, showLabels, onSearch,
+                    "Search", SearchIcon, focusLift, showLabels, onSearch,
                     Modifier.then(if (entry == apps.size) Modifier.focusRequester(firstFocus) else Modifier)
                         .onPreviewKeyEvent { apps.isEmpty() && it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft }
                         .focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused("search") },
                 )
             }
-            item(key = "hidden") {
-                ShelfActionCard(
-                    "Hidden", HideAppIcon, focusLift, showLabels, onHiddenApps,
-                    Modifier.then(if (dockFocusKey == "hidden") Modifier.focusRequester(returnFocus) else Modifier)
-                        .then(if (entry == apps.size + 1) Modifier.focusRequester(firstFocus) else Modifier).focusProperties { up = upFocus; down = downFocus },
-                    onFocused = { onRowFocused("hidden") },
-                )
-            }
             item(key = "settings") {
                 ShelfActionCard(
-                    "Settings", Icons.Default.Settings, focusLift, showLabels, onSettings,
-                    Modifier.then(if (entry == apps.size + 2) Modifier.focusRequester(firstFocus) else Modifier)
+                    "Settings", SettingsIcon, focusLift, showLabels, onSettings,
+                    Modifier.then(if (entry == apps.size + 1) Modifier.focusRequester(firstFocus) else Modifier)
+                        .then(if (dockFocusKey == "settings") Modifier.focusRequester(returnFocus) else Modifier)
                         .onPreviewKeyEvent { it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight }
                         .focusProperties { up = upFocus; down = downFocus },
                     onFocused = { onRowFocused("settings") },
+                    badge = updateAvailable,
                 )
             }
         }
         }
     }
+}
+
+// Shown only for the focused tile, in space the dock always reserves, so focus never shifts the row.
+@Composable
+private fun TileLabel(text: String, visible: Boolean, color: Color = Color.White, bold: Boolean = false) {
+    val alpha = animateFloatAsState(if (visible) 1f else 0f, tween(TvMotion.LabelMillis), label = "Tile label")
+    Spacer(Modifier.height(8.dp))
+    Text(text, Modifier.graphicsLayer { this.alpha = alpha.value }, color = color, style = TvType.Caption,
+        fontWeight = if (bold) FontWeight.Bold else FontWeight.Medium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable
@@ -1656,37 +1647,33 @@ private fun ShelfActionCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
+    badge: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val pressed by interaction.collectIsPressedAsState()
-    val width = AppTileWidth
-    val height = AppTileHeight
     val surface by animateColorAsState(if (focused) FocusSurface else Color.White.copy(alpha = .09f), tween(180), label = "Dock action surface")
     val ink by animateColorAsState(if (focused) FocusContent else Color.White.copy(alpha = .9f), tween(180), label = "Dock action icon")
     Card(
         onClick = onClick,
-        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() }.width(width).tvFocusMotion(focused, pressed, focusLift).zIndex(if (focused) 1f else 0f),
+        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() }.width(ActionTileWidth)
+            .tvFocusMotion(focused, pressed, focusLift, surfaceHeight = AppTileHeight).zIndex(if (focused) 1f else 0f),
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
         scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f),
         border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
         interactionSource = interaction,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
-                Modifier.width(width).height(height).clip(AppTileShape)
+                Modifier.width(ActionTileWidth).height(AppTileHeight).clip(AppTileShape)
                     .background(surface)
                     .border(1.dp, if (focused) FocusSurface else SubtleBorder, AppTileShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = tr(label), tint = ink, modifier = Modifier.size(30.dp))
+                Icon(icon, contentDescription = tr(label), tint = ink, modifier = Modifier.size(28.dp))
+                if (badge) Box(Modifier.align(Alignment.TopEnd).padding(9.dp).size(8.dp).background(if (focused) FocusContent else Accent, CircleShape))
             }
-            if (showLabel) {
-                Spacer(Modifier.height(8.dp))
-                Text(tr(label), color = Color.White.copy(alpha = if (focused) 1f else .76f), fontSize = 12.sp)
-            }
+            if (showLabel) TileLabel(tr(label), focused)
         }
     }
 }
@@ -1720,7 +1707,8 @@ private fun AppCard(
     Card(
         onClick = { if (moving) onMoveDone() else onLaunch(app) },
         onLongClick = { if (!moving) onConfigure(app) },
-        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() }.width(tileWidth).tvFocusMotion(focused || moving, pressed && !moving, focusLift || moving)
+        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() }.width(tileWidth)
+            .tvFocusMotion(focused || moving, pressed && !moving, focusLift || moving, surfaceHeight = tileHeight)
             .zIndex(if (focused || moving) 1f else 0f)
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
@@ -1750,7 +1738,8 @@ private fun AppCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
-                Modifier.width(tileWidth).height(tileHeight).clip(AppTileShape)
+                Modifier.width(tileWidth).height(tileHeight)
+                    .clip(AppTileShape).tvFocusRim({ focusEdge.value }, AppTileShape, if (moving) 4.dp else 3.dp)
                     .background(if (app.banner == null) tileBackground else SolidColor(Color(0xFF171720))),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1760,27 +1749,11 @@ private fun AppCard(
                     contentScale = if (app.banner == null) ContentScale.Fit else ContentScale.Crop,
                     modifier = if (app.banner == null) Modifier.fillMaxWidth(.82f).fillMaxHeight(.78f) else Modifier.fillMaxSize(),
                 )
-                Box(Modifier.fillMaxSize().drawWithCache {
-                    val outline = AppTileShape.createOutline(size, layoutDirection, this)
-                    // The tile clips the outer half of the stroke, keeping the rim inside its shape.
-                    val stroke = Stroke((if (moving) 6.dp else 4.dp).toPx())
-                    onDrawBehind {
-                        val edge = focusEdge.value
-                        if (edge.alpha > 0f) drawOutline(outline, edge, style = stroke)
-                    }
-                })
             }
-            if (showLabel || moving) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    if (moving) (if (LocalRomanian.current) "←  MUTĂ $movePosition  →" else "←  MOVE $movePosition  →") else app.name,
-                    color = if (moving) WarmAccent else Color.White.copy(alpha = if (focused) 1f else .76f),
-                    fontSize = 12.sp,
-                    fontWeight = if (moving) FontWeight.Bold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            if (showLabel || moving) TileLabel(
+                if (moving) (if (LocalRomanian.current) "←  MUTĂ $movePosition  →" else "←  MOVE $movePosition  →") else app.name,
+                focused || moving, if (moving) WarmAccent else Color.White, bold = moving,
+            )
         }
     }
 }
@@ -1828,7 +1801,7 @@ private fun TvDialog(
                         confirmPress.consume(native.keyCode, event.type == KeyEventType.KeyDown, native.repeatCount, native.downTime, ready)
                     else -> false
                 }
-            }.padding(horizontal = if (alignment == Alignment.CenterEnd) 48.dp else 0.dp,
+            }.padding(horizontal = if (alignment == Alignment.CenterEnd) ScreenMargin else 0.dp,
                 vertical = if (alignment == Alignment.CenterEnd) 24.dp else 0.dp),
             contentAlignment = alignment,
         ) {
@@ -1870,7 +1843,7 @@ private fun TvTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
-        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 20.sp),
+        textStyle = TvType.Headline.copy(color = Color.White, fontWeight = FontWeight.Normal),
         cursorBrush = SolidColor(Accent),
         keyboardOptions = KeyboardOptions(imeAction = imeAction),
         modifier = modifier.onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { event ->
@@ -1887,7 +1860,7 @@ private fun TvTextField(
                     .padding(horizontal = 22.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (value.isEmpty()) Text(tr(placeholder), color = SecondaryText, fontSize = 20.sp)
+                if (value.isEmpty()) Text(tr(placeholder), color = SecondaryText, style = TvType.Headline)
                 field()
             }
         },
@@ -1912,13 +1885,13 @@ private fun AppOptionsDialog(
         Column(Modifier.padding(DialogPadding).focusRestorer(first).focusGroup()) {
             DialogHeader(app.name, "App options",
                 leading = { AsyncImage(app.icon, null, Modifier.size(48.dp), contentScale = ContentScale.Fit) },
-                action = { ActionButton("Close", icon = Icons.Default.Close, iconOnly = true, onClick = close) },
+                action = { ActionButton("Close", icon = CloseIcon, iconOnly = true, onClick = close) },
             )
             Spacer(Modifier.height(24.dp))
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AppOptionTile("Move", "Reorder on Home", Icons.AutoMirrored.Filled.List, Modifier.focusRequester(first), navigation = false) { choose(onMove) }
-                AppOptionTile("Rename", "Change the name shown on Home", Icons.Default.Edit) { choose(onRename) }
-                AppOptionTile("App info", "Manage or uninstall", Icons.Default.Info) { choose(onAppInfo) }
+                AppOptionTile("Move", "Reorder on Home", MoveIcon, Modifier.focusRequester(first), navigation = false) { choose(onMove) }
+                AppOptionTile("Rename", "Change the name shown on Home", EditIcon) { choose(onRename) }
+                AppOptionTile("App info", "Manage or uninstall", InfoIcon) { choose(onAppInfo) }
                 AppOptionTile("Hide", "Restore anytime from Hidden apps", HideAppIcon, navigation = false) { choose(onHide) }
             }
         }
@@ -1954,11 +1927,11 @@ private fun AppRenameDialog(
                 )
                 Spacer(Modifier.height(GapLarge))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ActionButton("Reset", icon = Icons.Default.Refresh, onClick = { keyboard?.hide(); action = onReset; close() })
+                    ActionButton("Reset", icon = RefreshIcon, onClick = { keyboard?.hide(); action = onReset; close() })
                     Spacer(Modifier.width(Gap))
-                    ActionButton("Cancel", icon = Icons.Default.Close, onClick = close)
+                    ActionButton("Cancel", icon = CloseIcon, onClick = close)
                     Spacer(Modifier.width(Gap))
-                    ActionButton("Save", icon = Icons.Default.Check, enabled = name.isNotBlank(), role = ActionRole.Primary) {
+                    ActionButton("Save", icon = CheckIcon, enabled = name.isNotBlank(), role = ActionRole.Primary) {
                         keyboard?.hide()
                         action = { onSave(name.trim()) }
                         close()
@@ -1994,24 +1967,24 @@ private fun HiddenAppsDialog(
         }
         Column(Modifier.padding(DialogPadding)) {
             DialogHeader("Hidden apps", "Open an app or return it to Home", action = {
-                ActionButton("Done", Modifier.focusRequester(done), icon = Icons.Default.Check, iconOnly = true, onClick = close)
+                ActionButton("Done", Modifier.focusRequester(done), icon = CheckIcon, iconOnly = true, onClick = close)
             })
             Spacer(Modifier.height(GapLarge))
             if (apps.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Home, null, tint = Accent, modifier = Modifier.size(36.dp))
+                    Icon(HomeIcon, null, tint = Accent, modifier = Modifier.size(36.dp))
                     Spacer(Modifier.height(12.dp))
-                    Text(tr("No hidden apps"), fontSize = 22.sp, color = Color.White)
-                    Text(tr("All your apps are on Home"), fontSize = 13.sp, color = SecondaryText)
+                    Text(tr("No hidden apps"), style = TvType.Headline, color = Color.White)
+                    Text(tr("All your apps are on Home"), style = TvType.Footnote, color = SecondaryText)
                 }
             } else LazyColumn(state = listState, modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(apps, key = { _, app -> launcherAppKey(app) }, contentType = { _, _ -> "hidden-app" }) { index, app ->
                     Row(Modifier.animateItem(fadeInSpec = tween(TvMotion.InsertMillis), placementSpec = tween(TvMotion.EnterMillis, easing = LinearOutSlowInEasing), fadeOutSpec = tween(TvMotion.RemoveMillis)).fillMaxWidth().clip(ControlShape).background(GroupSurface).padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         AsyncImage(app.icon, null, Modifier.size(42.dp), contentScale = ContentScale.Fit)
-                        Text(app.name, modifier = Modifier.weight(1f), fontSize = 17.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        ActionButton("Open", icon = Icons.Default.PlayArrow) { onLaunch(app) }
-                        ActionButton("Show on Home", Modifier.focusRequester(restoreFocus[index]), icon = Icons.Default.Home) {
+                        Text(app.name, modifier = Modifier.weight(1f), style = TvType.Body, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        ActionButton("Open", icon = PlayIcon) { onLaunch(app) }
+                        ActionButton("Show on Home", Modifier.focusRequester(restoreFocus[index]), icon = HomeIcon) {
                             restoredIndex = index
                             onRestore(app)
                         }
@@ -2075,7 +2048,7 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
                     else -> "Choose the correct location"
                 }),
                 color = SecondaryText,
-                fontSize = 12.sp,
+                style = TvType.Caption,
             )
             Spacer(Modifier.height(Gap))
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2089,10 +2062,10 @@ private fun WeatherLocationDialog(location: String, onSave: (WeatherPlace) -> Un
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                ActionButton("Cancel", icon = Icons.Default.Close, onClick = close)
+                ActionButton("Cancel", icon = CloseIcon, onClick = close)
                 selected?.let { place ->
                     Spacer(Modifier.width(Gap))
-                    ActionButton("Use location", Modifier.focusRequester(confirm), icon = Icons.Default.Check, role = ActionRole.Primary) { onSave(place) }
+                    ActionButton("Use location", Modifier.focusRequester(confirm), icon = CheckIcon, role = ActionRole.Primary) { onSave(place) }
                 }
             }
         }
@@ -2106,6 +2079,9 @@ private fun SettingsDialog(
     onSectionChange: (Int) -> Unit,
     updateStatus: UpdateStatus,
     onUpdate: () -> Unit,
+    updateAvailable: Boolean,
+    deviceStatsEnabled: Boolean,
+    onDeviceStats: (Boolean) -> Unit,
     theaterEnabled: Boolean,
     idleMinutes: Int,
     focusLift: Boolean,
@@ -2134,9 +2110,9 @@ private fun SettingsDialog(
     onHomeSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val categoryFocus = remember { List(4) { FocusRequester() } }
+    val categoryFocus = remember { List(5) { FocusRequester() } }
     val contentFocus = remember { FocusRequester() }
-    val titles = listOf("Home", "Apps", "Weather", "System")
+    val titles = listOf("Home", "Apps", "Weather", "System", "Device")
     val contentScroll = rememberScrollState()
     LaunchedEffect(section) { contentScroll.scrollTo(0) }
     CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
@@ -2150,7 +2126,7 @@ private fun SettingsDialog(
                 0 -> if (moviesEnabled) titles[section] else "Daily wallpaper · Picsum"
                 else -> titles[section]
             }, action = {
-                ActionButton("Done", icon = Icons.Default.Check, iconOnly = true, onClick = close)
+                ActionButton("Done", icon = CheckIcon, iconOnly = true, onClick = close)
             })
             Spacer(Modifier.height(20.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -2161,10 +2137,11 @@ private fun SettingsDialog(
                             .focusProperties { right = contentFocus },
                             isSelected = section == index, role = ActionRole.Navigation,
                             icon = when (index) {
-                                0 -> Icons.Default.Home
-                                1 -> Icons.AutoMirrored.Filled.List
+                                0 -> HomeIcon
+                                1 -> AppsIcon
                                 2 -> ImageVector.vectorResource(R.drawable.weather_sun)
-                                else -> Icons.Default.Settings
+                                3 -> SettingsIcon
+                                else -> DisplayIcon
                             }) { onSectionChange(index) }
                     }
                 }
@@ -2196,27 +2173,26 @@ private fun SettingsDialog(
                             SettingsRow("Device settings", Modifier.focusRequester(contentFocus), subtitle = "Network, display, sound and Android system", onClick = onSystemSettings)
                             SettingsRow("Default home", onClick = onHomeSettings)
                             SettingsRow("Language", value = if (romanian) "Română" else "English", navigation = false) { onLanguage(!romanian) }
-                            Text(tr("Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo"),
-                                color = SecondaryText, fontSize = 11.sp, lineHeight = 16.sp,
+                            val installReady = updateStatus.label == "Install update"
+                            SettingsRow(
+                                if (installReady) "Install update" else "Check for updates",
+                                value = "v${BuildConfig.VERSION_NAME}",
+                                subtitle = when {
+                                    updateStatus.busy -> updateStatus.label
+                                    updateStatus.message.isNotBlank() -> updateStatus.message
+                                    updateAvailable -> "Update available"
+                                    else -> null
+                                },
+                                navigation = false,
+                            ) { if (!updateStatus.busy) onUpdate() }
+                            Text(tr("Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo · Inter typeface, SIL OFL"),
+                                color = SecondaryText, style = TvType.Caption,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
                         }
+                        4 -> DevicePanel {
+                            SettingsRow("Show on Home", Modifier.focusRequester(contentFocus), subtitle = "Free memory, storage and network", checked = deviceStatsEnabled) { onDeviceStats(!deviceStatsEnabled) }
+                        }
                     }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            Column(Modifier.fillMaxWidth().clip(ControlShape).background(GroupSurface).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("v${BuildConfig.VERSION_NAME}", color = SecondaryText, fontSize = 12.sp)
-                    AnimatedContent(
-                        targetState = if (updateStatus.busy) updateStatus.label else updateStatus.message,
-                        modifier = Modifier.weight(1f).heightIn(min = 18.dp),
-                        contentAlignment = Alignment.CenterEnd,
-                        transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(90)) }, label = "update status",
-                    ) { message -> Text(tr(message), color = if (updateStatus.busy) Accent else SecondaryText,
-                        fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, textAlign = TextAlign.End) }
-                }
-                ActionButton(if (updateStatus.label == "Install update") "Install update" else "Check for updates", Modifier.fillMaxWidth(), icon = Icons.Default.Refresh, enabled = !updateStatus.busy) {
-                    if (!updateStatus.busy) onUpdate()
                 }
             }
         }
@@ -2298,7 +2274,7 @@ private fun SearchDialog(
             DialogHeader(
                 "Search",
                 "Movies, series and animation",
-                action = { ActionButton("Close", icon = Icons.Default.Close, iconOnly = true, onClick = close) },
+                action = { ActionButton("Close", icon = CloseIcon, iconOnly = true, onClick = close) },
             )
             Spacer(Modifier.height(GapLarge))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Gap)) {
@@ -2309,7 +2285,7 @@ private fun SearchDialog(
                     imeAction = ImeAction.Search,
                     modifier = Modifier.weight(1f).focusRequester(inputRequester),
                 )
-                ActionButton("Clear", icon = Icons.Default.Close, iconOnly = true, enabled = query.isNotEmpty()) {
+                ActionButton("Clear", icon = CloseIcon, iconOnly = true, enabled = query.isNotEmpty()) {
                     query = ""
                     inputRequester.requestFocus()
                     keyboard?.show()
@@ -2329,21 +2305,21 @@ private fun SearchDialog(
                     else -> "Suggestions"
                 }),
                 color = Color.White,
-                fontSize = 20.sp,
+                style = TvType.Headline,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
             Box(Modifier.fillMaxWidth().height(140.dp)) {
                 if (shown.isNotEmpty() && !failed) PosterStrip(
-                    shown, state = resultState, modifier = Modifier.graphicsLayer { alpha = if (loading) .35f else 1f },
+                    shown, state = resultState, alwaysLabeled = true, modifier = Modifier.graphicsLayer { alpha = if (loading) .35f else 1f },
                     itemModifier = { if (it == resultState.firstVisibleItemIndex) Modifier.focusRequester(resultRequester) else Modifier },
                     onSelect = { if (!loading) { keyboard?.hide(); onSelect(it) } },
                 )
                 else if (loading) LoadingPosterRow()
                 else Column(Modifier.align(Alignment.CenterStart), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(tr(if (!online) "Waiting for internet" else if (failed) "Check your connection and search again" else if (query.trim().length >= 2) "Try a different title" else "Search movies, series and animation"),
-                    color = SecondaryText, fontSize = 14.sp)
-                    if (failed) ActionButton("Retry", icon = Icons.Default.Refresh) { retry += 1 }
+                    color = SecondaryText, style = TvType.Footnote)
+                    if (failed) ActionButton("Retry", icon = RefreshIcon) { retry += 1 }
                 }
             }
         }
@@ -2360,6 +2336,7 @@ private fun LauncherStage(
     heroContentVisible: Boolean = true,
     heroContentAlpha: () -> Float = { 1f },
     statusAlpha: () -> Float = { 1f },
+    statusPaused: Boolean = false,
     heroAction: @Composable () -> Unit,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
 ) {
@@ -2400,52 +2377,45 @@ private fun LauncherStage(
             )
         }
         Column(
-            Modifier.align(Alignment.TopStart).width(570.dp).padding(start = 58.dp, top = 108.dp, end = 24.dp)
+            Modifier.align(Alignment.TopStart).width(570.dp).padding(start = ScreenMargin, top = 96.dp, end = 24.dp)
                 .semantics { if (!heroContentVisible) hideFromAccessibility() }
                 .graphicsLayer {
                     translationY = (1f - reveal.value) * 8.dp.toPx()
                     alpha = reveal.value * heroContentAlpha()
                 },
         ) {
-            Text(
-                displayed?.title ?: tr("Your apps, ready"),
-                color = Color.White,
-                fontSize = 40.sp,
-                lineHeight = 44.sp,
-                letterSpacing = (-1.2).sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                displayed?.let { movie ->
-                    releaseLabel(movie.releaseDate).takeIf { it.startsWith("◷ COMING ") }?.let { tr(it) }
-                        ?: "${movie.year}   ·   ${tr(mediaRating(movie))}"
-                } ?: "",
-                color = Color.White.copy(alpha = .82f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
+            val shownHero = displayed
+            if (shownHero != null) key(mediaKey(shownHero)) {
+                TitleArtwork(shownHero, TvType.Hero, logoWidth = 380.dp, logoHeight = 104.dp)
+            } else Text(tr("Your apps, ready"), color = Color.White, style = TvType.Hero, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(10.dp))
+            val comingSoon = displayed?.let { releaseLabel(it.releaseDate).takeIf { label -> label.startsWith("◷ COMING ") } }
+            MetaLine(
+                when {
+                    shownHero == null -> emptyList()
+                    comingSoon != null -> listOf(tr(comingSoon).removePrefix("◷ "))
+                    else -> listOf(shownHero.year, tr(mediaRating(shownHero)))
+                },
+                Color.White.copy(alpha = .86f), TvType.Footnote.overArtwork().copy(fontWeight = FontWeight.Medium),
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 displayed?.overview.orEmpty(),
                 color = Color.White.copy(alpha = .82f),
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
+                style = TvType.Footnote,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
             heroAction()
         }
-        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 58.dp).graphicsLayer { alpha = statusAlpha() })
+        HomeStatus(weather, weatherState, use24HourClock, Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = ScreenMargin).graphicsLayer { alpha = statusAlpha() }, paused = statusPaused)
         content()
     }
 }
 
 @Composable
-private fun rememberSystemTime(): java.time.ZonedDateTime {
+internal fun rememberSystemTime(): java.time.ZonedDateTime {
     var time by remember { mutableStateOf(java.time.ZonedDateTime.now()) }
     val context = LocalContext.current
     val isForeground = LocalForeground.current
@@ -2472,40 +2442,6 @@ private fun rememberSystemTime(): java.time.ZonedDateTime {
     return time
 }
 
-@Composable
-internal fun HomeStatus(
-    weather: WeatherNow?,
-    weatherState: WeatherLoadState,
-    use24HourClock: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val time = rememberSystemTime().toLocalTime()
-    Column(modifier, horizontalAlignment = Alignment.End) {
-        HomeClock(time, use24HourClock)
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            AnimatedContent(
-                targetState = weather?.let { weatherKind(it.code, it.isDay) },
-                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) },
-                label = "Weather icon",
-            ) { kind ->
-                if (kind == null) {
-                    Icon(Icons.Default.Refresh, contentDescription = tr("Loading weather"), tint = Color(0xFFB4D8FF), modifier = Modifier.size(32.dp))
-                } else {
-                    Icon(androidx.compose.ui.res.painterResource(kind.icon), contentDescription = tr(kind.label),
-                        tint = Color(kind.color), modifier = Modifier.size(32.dp))
-                }
-            }
-            HomeTemperature(weather?.temperature, FootballTextStyle.copy(
-                color = Color.White, fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.Medium))
-        }
-        if (weather == null || weatherState == WeatherLoadState.Error) {
-            Text(tr(if (!LocalInternet.current) "Waiting for internet" else if (weatherState == WeatherLoadState.Error) "Updating weather" else "Loading weather"),
-                color = Color.White.copy(alpha = .85f), fontSize = 13.sp, style = FootballTextStyle)
-        }
-    }
-}
-
 internal fun formatHomeTime(time: LocalTime, use24HourClock: Boolean) =
     time.format(DateTimeFormatter.ofPattern(if (use24HourClock) "HH:mm" else "h:mm a"))
 
@@ -2522,13 +2458,13 @@ private fun MediaRow(
     onItemFocused: (Int) -> Unit,
 ) {
     Column {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(tr(section.title), color = Color.White, fontSize = 22.sp, lineHeight = 28.sp,
+        Row(Modifier.fillMaxWidth().padding(horizontal = ScreenMargin), verticalAlignment = Alignment.CenterVertically) {
+            Text(tr(section.title), color = Color.White, style = TvType.Headline,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             positionLabel?.let { InfoBadge(it, SecondaryText) }
         }
         Spacer(Modifier.height(12.dp))
-        CompositionLocalProvider(LocalBringIntoViewSpec provides RowBringIntoViewSpec) {
+        CompositionLocalProvider(LocalBringIntoViewSpec provides rememberRowBringIntoView()) {
             PosterStrip(
                 section.items,
                 onSelect,
@@ -2537,7 +2473,7 @@ private fun MediaRow(
                 modifier = Modifier.height(148.dp),
                 itemWidth = 216.dp,
                 itemHeight = 132.dp,
-                contentPadding = PaddingValues(start = 48.dp, end = 72.dp, top = 8.dp, bottom = 8.dp),
+                contentPadding = PaddingValues(start = ScreenMargin, end = 72.dp, top = 8.dp, bottom = 8.dp),
                 itemModifier = { index ->
                     Modifier.focusRequester(itemFocus[index]).focusProperties { this.canFocus = canFocus }.onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -2561,6 +2497,7 @@ private fun PosterStrip(
     onSelect: (MediaItem) -> Unit,
     state: LazyListState? = null,
     liftOnFocus: Boolean = true,
+    alwaysLabeled: Boolean = false,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(start = 8.dp, end = 28.dp, top = 8.dp, bottom = 8.dp),
     firstModifier: Modifier = Modifier,
@@ -2583,6 +2520,7 @@ private fun PosterStrip(
                 (if (index == 0) firstModifier else Modifier).then(itemModifier(index)),
                 itemWidth,
                 itemHeight,
+                alwaysLabeled,
             )
         }
     }
@@ -2596,21 +2534,26 @@ private fun PosterCard(
     modifier: Modifier = Modifier,
     width: androidx.compose.ui.unit.Dp = 196.dp,
     height: androidx.compose.ui.unit.Dp = 116.dp,
+    alwaysLabeled: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(12.dp)
+    val pressed by interaction.collectIsPressedAsState()
     val retainArtwork = with(LocalDensity.current) { retainBackdrop(width.roundToPx(), height.roundToPx()) }
+    val rim = animateColorAsState(if (focused) FocusSurface else Color.Transparent, tween(180), label = "Poster focus edge")
+    // Resting artwork stays clean; title and scrim fade in with focus, composed only while needed.
+    val label = animateFloatAsState(if (focused || alwaysLabeled) 1f else 0f, tween(TvMotion.LabelMillis), label = "Poster label")
+    val labelComposed by remember { derivedStateOf { label.value > 0f } }
     Card(
         onClick = { onSelect(item) },
-        modifier = modifier.width(width).height(height).zIndex(if (focused) 1f else 0f),
-        shape = CardDefaults.shape(shape = shape),
+        modifier = modifier.width(width).height(height).tvFocusMotion(focused, pressed, liftOnFocus, corner = PosterCorner).zIndex(if (focused) 1f else 0f),
+        shape = CardDefaults.shape(shape = PosterShape),
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
-        scale = CardDefaults.scale(focusedScale = if (liftOnFocus) 1.035f else 1f, pressedScale = .98f),
-        border = CardDefaults.border(focusedBorder = Border(BorderStroke(2.dp, FocusSurface), shape = shape)),
+        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f),
+        border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
         interactionSource = interaction,
     ) {
-        Box(Modifier.fillMaxSize().graphicsLayer {
+        Box(Modifier.fillMaxSize().tvFocusRim({ rim.value }, PosterShape).graphicsLayer {
             // Artwork, labels, and scrims stay still while the outer TV surface scales.
             compositingStrategy = if (retainArtwork) CompositingStrategy.Offscreen else CompositingStrategy.Auto
         }.background(Brush.linearGradient(listOf(ControlSurface, Background)))) {
@@ -2621,12 +2564,13 @@ private fun PosterCard(
             )
             else Image(painterResource(R.drawable.reelora_mark), null, Modifier.size(52.dp).align(Alignment.Center))
             cardReleaseLabel(item.releaseDate)?.let { InfoBadge(it, WarmAccent, Modifier.align(Alignment.TopStart).padding(7.dp)) }
-            Box(Modifier.fillMaxWidth().height(82.dp).align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))))
-            Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Text(item.title, color = Color.White, fontSize = 14.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOfNotNull(item.year, primaryGenre(item)?.let { tr(it) }, tr(mediaRating(item))).joinToString(" · "),
-                    color = SecondaryText, fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (labelComposed) Box(Modifier.fillMaxSize().graphicsLayer { alpha = label.value }) {
+                Box(Modifier.fillMaxWidth().height(82.dp).align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Background.copy(alpha = .94f)))))
+                Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    Text(item.title, color = Color.White, style = TvType.Footnote, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    MetaLine(listOfNotNull(item.year, primaryGenre(item)?.let { tr(it) }, tr(mediaRating(item))), SecondaryText, TvType.Caption)
+                }
             }
         }
     }
@@ -2711,23 +2655,19 @@ private fun DetailsDialog(
         ) {
             item(key = "hero") {
                 Column(
-                    Modifier.fillParentMaxHeight(.86f).fillMaxWidth().padding(horizontal = 64.dp),
+                    Modifier.fillParentMaxHeight(.96f).fillMaxWidth().padding(horizontal = ScreenMargin),
                     verticalArrangement = Arrangement.Bottom,
                 ) {
-                    Text(item.title, Modifier.widthIn(max = 780.dp), color = Color.White, fontSize = 52.sp, lineHeight = 56.sp,
-                        letterSpacing = (-1.4).sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(10.dp))
-                    val metadata = listOf(
-                        item.year,
-                        details?.genres.orEmpty(),
-                        details?.runtime.orEmpty(),
-                        tr(mediaRating(item)),
-                    ).filter { it.isNotBlank() }.joinToString("  ·  ")
-                    Text(metadata, Modifier.heightIn(min = 20.dp), color = Color.White.copy(alpha = .78f), fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TitleArtwork(item, TvType.Display, logoWidth = 420.dp, logoHeight = 116.dp)
+                    Spacer(Modifier.height(12.dp))
+                    MetaLine(
+                        listOf(item.year, details?.genres.orEmpty(), details?.runtime.orEmpty(), tr(mediaRating(item))),
+                        Color.White.copy(alpha = .78f), TvType.Body.copy(fontWeight = FontWeight.Medium),
+                        Modifier.heightIn(min = 24.dp),
+                    )
                     Spacer(Modifier.height(14.dp))
                     Text(item.overview, Modifier.widthIn(max = 660.dp), color = Color.White.copy(alpha = .86f),
-                        fontSize = 17.sp, lineHeight = 25.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        style = TvType.Body, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(16.dp))
                     Row(Modifier.heightIn(min = 30.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         // "Released" is implied by a rating; only upcoming or fresh dates earn a badge.
@@ -2735,7 +2675,7 @@ private fun DetailsDialog(
                         if (!release.startsWith("✓")) InfoBadge(release, if (release.startsWith("●")) Color(0xFF66D69A) else WarmAccent)
                         details?.availability?.let {
                             AvailabilityBadge(it)
-                            Text(tr("via JustWatch"), color = SecondaryText, fontSize = 11.sp)
+                            Text(tr("via JustWatch"), color = SecondaryText, style = TvType.Caption)
                         }
                     }
                     Spacer(Modifier.height(22.dp))
@@ -2743,14 +2683,14 @@ private fun DetailsDialog(
                         verticalAlignment = Alignment.CenterVertically) {
                         if (trailer != null) {
                             ActionButton("Play trailer", Modifier.focusRequester(requester), onFocused = restoreTop,
-                                icon = Icons.Default.PlayArrow, role = ActionRole.Primary) { onPlayTrailer(trailer) }
+                                icon = PlayIcon, role = ActionRole.Primary) { onPlayTrailer(trailer) }
                         } else if (details == null) LoadingBlock(150.dp, 48.dp, 24.dp)
                         ActionButton(
                             "Back",
                             modifier = (if (trailer == null) Modifier.focusRequester(requester) else Modifier)
                                 .onFocusChanged { backFocused = it.isFocused },
                             onFocused = restoreTop,
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            icon = BackIcon,
                             iconOnly = true,
                             onClick = close,
                         )
@@ -2758,7 +2698,7 @@ private fun DetailsDialog(
                 }
             }
             item { Column {
-                Text(tr("Cast"), Modifier.padding(start = 64.dp), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr("Cast"), Modifier.padding(start = ScreenMargin), color = Color.White, style = TvType.Headline, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 Box(Modifier.heightIn(min = with(LocalDensity.current) { 90.dp + 44.sp.toDp() })) { CastRow(
                     details?.cast,
@@ -2778,17 +2718,17 @@ private fun DetailsDialog(
             selectedActor?.let { actor ->
                 val titles = actorTitles
                 item(key = "actor-credits") { Column {
-                    Text(tr("${actor.name} · Movies & TV${if (actorLoading && titles != null) " · Updating…" else ""}"), Modifier.padding(start = 64.dp), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(tr("${actor.name} · Movies & TV${if (actorLoading && titles != null) " · Updating…" else ""}"), Modifier.padding(start = ScreenMargin), color = Color.White, style = TvType.Headline, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(10.dp))
                     when {
                         titles == null -> LoadingPosterRow()
-                        titles.isEmpty() -> Text(tr("No other titles found"), Modifier.padding(start = 64.dp), color = SecondaryText, fontSize = 14.sp)
+                        titles.isEmpty() -> Text(tr("No other titles found"), Modifier.padding(start = ScreenMargin), color = SecondaryText, style = TvType.Footnote)
                         else -> PosterStrip(titles, onSelect, contentPadding = DetailsRowPadding, firstModifier = Modifier.focusRequester(actorRowRequester))
                     }
                 } }
             }
             item { Column {
-                Text(tr("More like this"), Modifier.padding(start = 64.dp), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(tr("More like this"), Modifier.padding(start = ScreenMargin), color = Color.White, style = TvType.Headline, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 PosterStrip(moreLike, onSelect, contentPadding = DetailsRowPadding, firstModifier = Modifier.focusRequester(similarRowRequester))
             } }
@@ -2839,7 +2779,9 @@ private val MinimalBringIntoView = object : BringIntoViewSpec {
     }
 }
 
-private val DetailsRowPadding = PaddingValues(start = 58.dp, end = 64.dp, top = 8.dp, bottom = 8.dp)
+private val DetailsRowPadding = PaddingValues(start = ScreenMargin, end = ScreenMargin, top = 8.dp, bottom = 8.dp)
+// Cast cards are wider than their portraits; this lands the first portrait on the margin.
+private val CastRowPadding = PaddingValues(start = ScreenMargin - 19.dp, end = ScreenMargin, top = 8.dp, bottom = 8.dp)
 
 @Composable
 private fun AvailabilityBadge(availability: WatchAvailability) {
@@ -2858,19 +2800,20 @@ private fun AvailabilityBadge(availability: WatchAvailability) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(if (streaming) "▶" else if (providers.isNotEmpty()) "\$" else "—", color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        if (streaming) Icon(PlayIcon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+        else if (providers.isNotEmpty()) Icon(PriceIcon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
         providers.take(3).forEach { provider ->
             provider.logoUrl?.let { AsyncImage(artworkModel(it), provider.name, Modifier.size(20.dp).clip(RoundedCornerShape(5.dp))) }
         }
         Text(
             tr(when {
-                streaming -> "STREAMING"
-                providers.isNotEmpty() -> "RENT / BUY"
-                else -> "NO STREAMING LISTED"
+                streaming -> "Streaming"
+                providers.isNotEmpty() -> "Rent or buy"
+                else -> "No streaming listed"
             }),
             color = color,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
+            style = TvType.Caption,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
         )
     }
@@ -2888,11 +2831,11 @@ private fun CastRow(
         return
     }
     if (cast.isEmpty()) {
-        Text(tr("Cast information unavailable"), color = SecondaryText, fontSize = 14.sp, modifier = Modifier.padding(start = 64.dp).height(98.dp))
+        Text(tr("Cast information unavailable"), color = SecondaryText, style = TvType.Footnote, modifier = Modifier.padding(start = ScreenMargin).height(98.dp))
         return
     }
     LazyRow(
-        contentPadding = DetailsRowPadding,
+        contentPadding = CastRowPadding,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.focusGroup(),
     ) {
@@ -2906,9 +2849,10 @@ private fun CastRow(
 private fun CastCard(person: CastMember, selected: Boolean, onDown: () -> Unit, onSelect: (CastMember) -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val pressed by interaction.collectIsPressedAsState()
     Card(
         onClick = { onSelect(person) },
-        modifier = Modifier.width(96.dp).zIndex(if (focused) 1f else 0f)
+        modifier = Modifier.width(96.dp).tvFocusMotion(focused, pressed, lifted = true, shadow = false).zIndex(if (focused) 1f else 0f)
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
                     onDown()
@@ -2916,12 +2860,12 @@ private fun CastCard(person: CastMember, selected: Boolean, onDown: () -> Unit, 
                 } else false
             },
         colors = CardDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent),
-        scale = CardDefaults.scale(focusedScale = 1.04f, pressedScale = .98f),
+        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f),
         border = CardDefaults.border(border = Border.None, focusedBorder = Border.None, pressedBorder = Border.None),
         interactionSource = interaction,
     ) {
         Column(
-            Modifier.padding(vertical = 5.dp),
+            Modifier.fillMaxWidth().padding(vertical = 5.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
@@ -2931,11 +2875,11 @@ private fun CastCard(person: CastMember, selected: Boolean, onDown: () -> Unit, 
                 contentAlignment = Alignment.Center,
             ) {
                 if (person.profileUrl != null) AsyncImage(artworkModel(person.profileUrl), person.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else Text(person.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                else Text(person.name.take(1), color = Color.White, style = TvType.Headline, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(5.dp))
-            Text(person.name, color = if (selected) WarmAccent else Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-            Text(person.character, color = SecondaryText, fontSize = 12.sp, lineHeight = 14.sp, minLines = 1, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.name, color = if (selected) WarmAccent else Color.White, style = TvType.Caption, fontWeight = FontWeight.SemiBold, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.character, color = SecondaryText, style = TvType.Caption, minLines = 1, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
     }
 }

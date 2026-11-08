@@ -6,6 +6,12 @@ import androidx.compose.runtime.staticCompositionLocalOf
 internal val LocalRomanian = staticCompositionLocalOf { false }
 
 private val RomanianUi = mapOf(
+    "Movies by TMDB · Availability by JustWatch · Weather by Open-Meteo · Inter typeface, SIL OFL" to "Filme de la TMDB · Disponibilitate de la JustWatch · Vreme de la Open-Meteo · Font Inter, SIL OFL",
+    "Device" to "Dispozitiv", "Show on Home" to "Afișează pe Acasă", "Free memory, storage and network" to "Memorie liberă, stocare și rețea",
+    "Free memory" to "Memorie liberă", "Free storage" to "Stocare liberă", "Memory" to "Memorie", "Storage" to "Stocare", "Network" to "Rețea",
+    "Display" to "Ecran", "Thermal" to "Temperatură dispozitiv", "Normal" to "Normală", "Warm" to "Cald", "Hot" to "Fierbinte",
+    "free of" to "libere din", "Offline" to "Fără conexiune", "Ethernet" to "Ethernet", "Wi-Fi" to "Wi-Fi", "Connected" to "Conectat",
+    "Device is warm" to "Dispozitivul este cald", "Device is hot" to "Dispozitivul este fierbinte", "Update available" to "Actualizare disponibilă",
     "On" to "Pornit", "Off" to "Oprit", "Home screen" to "Ecran principal", "App labels" to "Etichete aplicații",
     "Ambient trailers" to "Trailere ambientale", "Start after" to "Pornire după", "Temperature" to "Temperatură",
     "Clock" to "Ceas", "Language" to "Limbă", "Weather" to "Vreme",
@@ -56,7 +62,7 @@ private val RomanianUi = mapOf(
     "Cast information unavailable" to "Informațiile despre distribuție nu sunt disponibile",
     "TOP FOOTBALL" to "FOTBAL IMPORTANT", "LIVE" to "LIVE", "NEXT" to "URMĂTORUL", "LAST" to "ULTIMUL",
     "Loading fixtures…" to "Se încarcă meciurile…", "Fixtures unavailable · retrying" to "Meciurile nu sunt disponibile · reîncercăm",
-    "No fixture" to "Niciun meci", "STREAMING" to "STREAMING", "RENT / BUY" to "ÎNCHIRIAZĂ / CUMPĂRĂ",
+    "No fixture" to "Niciun meci", "Streaming" to "Streaming", "Rent or buy" to "Închiriază sau cumpără",
     "Search movies & TV" to "Caută filme și seriale", "Manage Home apps" to "Gestionează aplicațiile",
     "Discover movies" to "Descoperă filme", "Popular movies" to "Filme populare",
     "Home" to "Acasă", "Apps" to "Aplicații", "Weather & time" to "Vreme și oră", "System" to "Sistem",
@@ -67,7 +73,7 @@ private val RomanianUi = mapOf(
     "Thriller" to "Thriller", "War" to "Război", "Western" to "Western", "Action & Adventure" to "Acțiune și aventură",
     "Kids" to "Copii", "News" to "Știri", "Reality" to "Reality", "Sci-Fi & Fantasy" to "SF și fantastic",
     "Soap" to "Telenovelă", "Talk" to "Talk-show", "War & Politics" to "Război și politică",
-    "NO STREAMING LISTED" to "FĂRĂ STREAMING LISTAT", "Coming soon" to "În curând", "Now in cinemas" to "Acum în cinematografe",
+    "No streaming listed" to "Fără streaming listat", "Coming soon" to "În curând", "Now in cinemas" to "Acum în cinematografe",
     "Trending this week" to "În tendințe săptămâna aceasta", "Top rated movies" to "Filme apreciate",
     "Popular series" to "Seriale populare", "Popular animation" to "Animații populare",
     "via JustWatch" to "prin JustWatch",

@@ -19,7 +19,7 @@ assert adb('shell', 'getprop', 'ro.kernel.qemu').strip() == '1', 'Use a local em
 args.output.mkdir(parents=True, exist_ok=True)
 original_scale = adb('shell', 'settings', 'get', 'system', 'font_scale').strip()
 try:
-    for scenario in ['ready', 'photo', 'live', 'missing', 'stale-live', 'long', 'loading', 'offline', 'stale', 'night', 'rain', 'snow', 'bright', 'large-romanian']:
+    for scenario in ['ready', 'photo', 'live', 'missing', 'stale-live', 'long', 'loading', 'offline', 'stale', 'night', 'rain', 'snow', 'bright', 'stats', 'hot', 'large-romanian']:
         large = scenario == 'large-romanian'
         adb('shell', 'settings', 'put', 'system', 'font_scale', '1.3' if large else '1.0')
         adb('shell', 'am', 'start', '-S', '-W', '-n', 'tv.reelora.app/.WidgetPreviewActivity',

@@ -84,6 +84,28 @@ Android TV emulator visual review covers settings, app options, rename, hidden a
 
 The release combines the artwork, dock, menu, accessibility, alignment, and smart-feature refinements above. All 44 unit tests and both lint variants pass. The distribution check verifies package/version, non-debuggable release flags, exclusion of preview activities, R8 mapping, ART profile, and APK signature. Installation on the Android TV emulator preserves preferences, and the installed APK matches the verified artifact byte for byte. The signing certificate matches the previously published release, allowing upgrades without uninstalling.
 
+## Apple-style consistency pass (November 8)
+
+This pass supersedes earlier notes where they differ, including the dock's glass slab, tile sizes, and the update footer.
+
+| Area | Decision |
+| --- | --- |
+| Type | Bundled Inter, subset to Latin and Romanian (84 KB). `TvType` is the whole scale, with a 12 sp floor. SF Pro and SF Symbols are not licensed for Android. |
+| Icons | `AppIcons.kt` is one local family: 24-unit grid, 1.75 stroke, round caps. Text glyphs for play, price, rating, and release state became icons. |
+| Focus | Content lifts 6% with a soft stacked shadow and an inner rim, through `tvFocusMotion` and `tvFocusRim`. Controls invert in place. No blur pass runs. |
+| Layout | `ScreenMargin` (58 dp) is the one horizontal margin. Focused cards stay inside it after scrolling. |
+| Dock | Search and Settings are square utility tiles. Hidden moved to Settings only, and the duplicate system Settings entry is filtered out. Labels appear on focus in reserved space. |
+| Shelves | The next shelf peeks below the focused one. Resting artwork carries no text; search results stay labeled because they are scanned. |
+| Titles | TMDB title logos replace text on the hero and details, with the plain title as fallback. Logos too dark for the scrim are tinted white. |
+
+### Device readings
+
+Home shows the date and today's high and low from the existing weather request. Free memory, free storage, and network are opt-in under Settings → Device, which also shows download speed, display mode, and thermal state. Offline, very weak Wi-Fi, and overheating surface on Home even when the readings are off.
+
+System-wide CPU load is deliberately absent. `/proc/stat` and `/proc/loadavg` were denied in the app sandbox on the Android 12 emulator, and clock speed does not measure load. Sampling is off the main thread, foreground only, and paused behind dialogs; values round before reaching Compose. The update dot uses at most one foreground lookup a day and never downloads.
+
+Readings were checked on the emulator only. Thermal, signal strength, and HDR depend on what each vendor reports and have not been verified on Fire TV.
+
 ## Ownership and reuse
 
 | File | Responsibility |
